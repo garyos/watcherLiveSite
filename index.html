@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>The Watcher</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="loading">
+  <header class="top">
+    <h1><a href="#home">The Watcher</a></h1>
+    <div class="tabs" role="tablist">
+      <a href="#home" id="tab-home" role="tab">Home</a>
+      <a href="#table" id="tab-table" role="tab">Table</a>
+      <a href="#stats" id="tab-stats" role="tab">Statistics</a>
+    </div>
+    <span id="summary" class="muted"></span>
+    <span class="spacer"></span>
+    <span id="updated" class="muted"></span>
+    <div class="colwrap" id="colwrap">
+      <button id="colbtn" type="button" aria-expanded="false">Columns</button>
+      <div id="colmenu" hidden></div>
+    </div>
+  </header>
+  <div id="banner" hidden>Showing placeholder sample data. Run the "Update data" workflow to load real UK listings.</div>
+
+  <div class="layout">
+    <nav id="filters" aria-label="Filters">
+      <div class="sheet-head">
+        <span class="grab" aria-hidden="true"></span>
+        <strong>Filters</strong>
+        <button id="reset" type="button" class="link">Reset all</button>
+        <button id="filters-close" type="button" class="x" aria-label="Close filters">✕</button>
+      </div>
+
+      <label class="field">Search everything
+        <input type="search" data-text="all" placeholder="title, cast, director, studio, plot…"></label>
+      <label class="field">Description contains
+        <input type="search" data-text="overview" placeholder="e.g. heist"></label>
+
+      <fieldset><legend>Type</legend>
+        <label><input type="radio" name="type" value="all" checked> All</label>
+        <label><input type="radio" name="type" value="film"> Films</label>
+        <label><input type="radio" name="type" value="series"> Series</label>
+      </fieldset>
+
+      <fieldset><legend>Platform</legend><div id="f-platforms"></div></fieldset>
+
+      <fieldset><legend>Ads</legend>
+        <label><input type="radio" name="access" value="any" checked> Any</label>
+        <label><input type="radio" name="access" value="adfree"> Without ads (included in plan)</label>
+        <label><input type="radio" name="access" value="ads"> With ads (ad tier available)</label>
+        <label><input type="radio" name="access" value="noads"> Ad-free only (no ad tier)</label>
+        <label><input type="radio" name="access" value="adsonly"> Only with ads (no ad-free option)</label>
+        <p class="hint">Only titles included in a subscription are listed; rent/buy is excluded.</p>
+      </fieldset>
+
+      <fieldset><legend>Genre <span class="hint">(must match all)</span></legend><div id="f-genres" class="scroll"></div></fieldset>
+      <fieldset><legend>Age rating (UK)</legend><div id="f-ages" class="chips"></div></fieldset>
+
+      <fieldset><legend>Original language <span class="hint">(any)</span></legend><div id="f-langs" class="scroll"></div></fieldset>
+      <fieldset><legend>Audio language <span class="hint">(any)</span></legend><div id="f-audio" class="scroll"></div>
+        <p class="hint">Only Prime Video and Disney+ publish this to JustWatch; Netflix and HBO Max usually show nothing.</p></fieldset>
+      <fieldset><legend>Subtitles <span class="hint">(any)</span></legend><div id="f-subs" class="scroll"></div></fieldset>
+
+      <fieldset class="picker"><legend>Actors <span class="hint">(must match all)</span></legend>
+        <div id="chips-actors" class="sel"></div>
+        <input type="search" id="q-actors" placeholder="Search actors…" autocomplete="off">
+        <div id="list-actors" class="scroll"></div>
+      </fieldset>
+      <fieldset class="picker"><legend>Directors <span class="hint">(must match all)</span></legend>
+        <div id="chips-directors" class="sel"></div>
+        <input type="search" id="q-directors" placeholder="Search directors…" autocomplete="off">
+        <div id="list-directors" class="scroll"></div>
+      </fieldset>
+
+      <fieldset><legend>Release year</legend>
+        <div class="pair"><input type="number" data-num="yearMin" placeholder="from"><input type="number" data-num="yearMax" placeholder="to"></div>
+      </fieldset>
+      <fieldset><legend>IMDb rating &amp; runtime</legend>
+        <div class="pair"><input type="number" step="0.1" min="0" max="10" data-num="ratingMin" placeholder="min rating"><input type="number" step="0.1" min="0" max="10" data-num="ratingMax" placeholder="max rating"></div>
+        <div class="pair"><input type="number" data-num="runtimeMin" placeholder="min mins"><input type="number" data-num="runtimeMax" placeholder="max mins"></div>
+      </fieldset>
+      <fieldset><legend>Series size</legend>
+        <div class="pair"><input type="number" min="0" data-num="seasonsMin" placeholder="min seasons"><input type="number" min="0" data-num="episodesMin" placeholder="min episodes"></div>
+      </fieldset>
+
+      <label class="field">Actor / director text<input type="search" data-text="people" placeholder="partial name"></label>
+      <label class="field">Production studio<input type="search" data-text="studios"></label>
+      <label class="field">Awards contain<input type="search" data-text="awards" placeholder="e.g. Oscar"></label>
+      <label class="check"><input type="checkbox" id="hasAwards"> Only titles with awards</label>
+      <div class="sheet-foot"><button id="filters-done" type="button" class="primary">Show <span id="doneCount"></span> titles</button></div>
+    </nav>
+
+    <main>
+      <div id="loader" role="status" aria-live="polite">
+        <span class="lname">The Watcher</span>
+        <span class="spinner" aria-hidden="true"></span>
+        <p>Loading the UK catalogue…</p>
+        <p class="lhint">First visit downloads about 8&nbsp;MB, so this can take a few seconds.</p>
+      </div>
+      <section id="view-home"><div id="homebody"></div></section>
+
+      <section id="view-table" hidden>
+        <div id="backbar" hidden>
+          <button id="back" type="button">← Back to statistics</button>
+          <span class="muted">Showing: <strong id="backlabel"></strong></span>
+        </div>
+        <div class="toolbar">
+          <label class="check"><input type="checkbox" id="expand" checked> Expand descriptions</label>
+          <span class="muted">Click a row for details</span>
+        </div>
+        <div class="tablewrap"><table id="tbl"><thead></thead><tbody></tbody></table></div>
+        <div class="pager">
+          <button id="prev" type="button">‹ Prev</button>
+          <span id="pageinfo"></span>
+          <button id="next" type="button">Next ›</button>
+          <label>Rows <select id="pagesize"><option>50</option><option selected>100</option><option>250</option><option>500</option></select></label>
+        </div>
+      </section>
+
+      <section id="view-stats" hidden><div id="statsbody"></div></section>
+    </main>
+  </div>
+
+  <div id="navscrim"></div>
+  <div id="filterbar">
+    <button id="openfilters" type="button" aria-controls="filters">☰ Filters <span id="fcount" class="count" hidden></span></button>
+    <span id="barcount" class="muted"></span>
+  </div>
+
+  <div id="scrim" hidden></div>
+  <aside id="flyout" aria-hidden="true" role="dialog" aria-label="Title details"></aside>
+  <script src="app.js" defer></script>
+</body>
+</html>

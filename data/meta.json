@@ -1,0 +1,35 @@
+{
+  "updated": "2026-10-12T01:04:38.633Z",
+  "region": "GB",
+  "sample": false,
+  "counts": {
+    "films": 26514,
+    "series": 8936
+  },
+  "platforms": [
+    {
+      "id": "netflix",
+      "name": "Netflix",
+      "color": "#e50914",
+      "searchUrl": "https://www.netflix.com/search?q={q}"
+    },
+    {
+      "id": "prime",
+      "name": "Prime Video",
+      "color": "#00a8e1",
+      "searchUrl": "https://www.primevideo.com/search/ref=atv_nb_sr?phrase={q}"
+    },
+    {
+      "id": "disney",
+      "name": "Disney+",
+      "color": "#3a5bd9",
+      "searchUrl": "https://www.disneyplus.com/search/{q}"
+    },
+    {
+      "id": "hbomax",
+      "name": "HBO Max",
+      "color": "#8f5cff",
+      "searchUrl": "https://play.hbomax.com/search?q={q}"
+    }
+  ]
+}
