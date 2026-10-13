@@ -866,8 +866,7 @@ function createBoard(cfg) {
   }
 
   // re-render everything that follows the universal platform / film-or-series / period controls
-  function sync() {
-    pages.clear(); // a change of filters starts every list back at its first page
+  function sync() { // pagination is kept across filter changes: a list stays at the page level you chose
     el('.gplat').innerHTML = platChips('data-gp', '', plat);
     if (el('.gtype')) el('.gtype').innerHTML = typeSeg('data-gt', '', gType);
     el('.grange').innerHTML = rangeSeg('data-gr', '', gRange);
@@ -945,15 +944,52 @@ function createBoard(cfg) {
     const cta = t.closest('[data-cta]');
     if (cta) return openCta(cta.dataset.cta);
     const jump = t.closest('[data-jump]');
-    if (jump) return document.getElementById(jump.dataset.jump)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (jump) { suspendDuringJump(); return document.getElementById(jump.dataset.jump)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
     const ex = t.closest('[data-expand]');
-    if (ex) $$('details.hl', root()).forEach((d) => { d.open = ex.dataset.expand === 'open'; });
+    if (ex) {
+      const open = ex.dataset.expand === 'open';
+      $$('details.hl', root()).forEach((d) => { if (open) d.dataset.bulk = '1'; else delete d.dataset.bulk; d.open = open; });
+    }
   });
   // lists render their rows the first time they are opened
   view.addEventListener('toggle', (e) => {
     const d = e.target;
-    if (d.matches?.('details.hl') && d.open && !d.querySelector('.lbody[data-ready]')) renderListBody(d.dataset.listId);
+    if (!d.matches?.('details.hl')) return;
+    if (!d.open) delete d.dataset.bulk;
+    else if (!d.querySelector('.lbody[data-ready]')) renderListBody(d.dataset.listId);
   }, true);
+
+  // A list you opened yourself keeps its header locked under the section chips while you read it (CSS), and
+  // collapses once it has scrolled off screen so the page stays short. Lists opened with "Expand all" stay open.
+  // The page height shrinks when a list above the viewport collapses, so scroll back by the same amount.
+  let suspended = false, ticking = false, jumpTimer;
+  const stickTop = () => parseFloat(getComputedStyle(view).getPropertyValue('--stick')) || 0;
+  function sweep() {
+    const vr = view.getBoundingClientRect();
+    const top = vr.top + stickTop();
+    const was = view.scrollTop; // read before collapsing: a shorter page makes the browser clamp scrollTop
+    let removed = 0;
+    for (const d of $$('details.hl[open]', root())) {
+      if (d.dataset.bulk) continue;
+      const r = d.getBoundingClientRect();
+      if (r.bottom < top) { const before = d.offsetHeight; d.open = false; removed += before - d.offsetHeight; }
+      else if (r.top > vr.bottom) d.open = false; // scrolled up past it: collapse, nothing visible moves
+    }
+    if (removed) view.scrollTo({ top: Math.max(0, was - removed), behavior: 'instant' });
+  }
+  view.addEventListener('scroll', () => {
+    if (suspended || ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => { ticking = false; sweep(); });
+  }, { passive: true });
+  // jumping to a section by its chip scrolls past many lists: wait until the scroll settles before tidying
+  function suspendDuringJump() {
+    suspended = true;
+    clearTimeout(jumpTimer);
+    const done = () => { if (!suspended) return; suspended = false; clearTimeout(jumpTimer); sweep(); };
+    view.addEventListener('scrollend', done, { once: true });
+    jumpTimer = setTimeout(done, 1800);
+  }
   view.addEventListener('error', (e) => { if (e.target.tagName === 'IMG') e.target.style.visibility = 'hidden'; }, true);
   return { build };
 }
