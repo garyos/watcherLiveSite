@@ -296,6 +296,39 @@ function buildColMenu() {
     `<label><input type="checkbox" data-col="${c.key}" ${hidden.has(c.key) ? '' : 'checked'}> ${c.label}</label>`).join('');
 }
 
+// ---------- sharing ----------
+// Shared links point at /t/<id>.html: a tiny static page per title (made by scripts/make-share-pages.mjs) whose tags give
+// chat apps a title, poster and "Watch on ..." line, and which sends a real visitor here with the flyout open.
+const shareUrl = (r) => new URL(`t/${encodeURIComponent(r.id)}.html`, location.href.split('#')[0]).href;
+const platformList = (r) => joinNames(r.offers.map((o) => platforms[o.platform]?.name).filter(Boolean));
+const shareText = (r) => `${r.type === 'film' ? '🎬' : '📺'} ${r.title}${r.year ? ` (${r.year})` : ''}${r.rating ? ` · ★ ${r.rating}` : ''}. Watch on ${platformList(r)}`;
+let toastTimer;
+function showToast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('on'), 2200);
+}
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch { /* not a secure context, or denied */ }
+  const ta = Object.assign(document.createElement('textarea'), { value: text });
+  ta.style.cssText = 'position:fixed;opacity:0';
+  document.body.append(ta);
+  ta.select();
+  const ok = document.execCommand?.('copy');
+  ta.remove();
+  return !!ok;
+}
+async function shareTitle(r, how) {
+  const url = shareUrl(r), text = shareText(r);
+  if (how === 'share' && navigator.share) {
+    try { await navigator.share({ title: r.title, text, url }); } catch { /* cancelled */ }
+    return;
+  }
+  showToast((await copyText(`${text}\n${url}`)) ? 'Link copied. Paste it into a chat.' : 'Could not copy the link');
+}
+
 // ---------- flyout ----------
 function openFlyout(r) {
   const row = (label, value) => (value ? `<dt>${label}</dt><dd>${esc(value)}</dd>` : '');
@@ -310,6 +343,11 @@ function openFlyout(r) {
       <p class="meta">${[r.year, r.type === 'film' ? 'Film' : 'Series', r.runtime ? fmtRuntime(r.runtime) + (r.type === 'series' ? ' / episode' : '') : ''].filter(Boolean).map(esc).join(' · ')}
         ${r.age ? `<span class="age">${esc(r.age)}</span>` : ''}
         ${r.rating ? `<span class="star" title="${num(r.votes)} IMDb votes">★ ${r.rating}</span>` : ''}</p>
+      <div class="share" role="group" aria-label="Share ${esc(r.title)}">
+        <button type="button" class="sharebtn" data-share="${esc(r.id)}">↗ Share</button>
+        <a class="wabtn" href="https://wa.me/?text=${encodeURIComponent(`${shareText(r)}\n${shareUrl(r)}`)}" target="_blank" rel="noopener">WhatsApp</a>
+        <button type="button" data-copy="${esc(r.id)}">Copy link</button>
+      </div>
       <p class="tags">${r.genres.map((g) => `<span class="tag">${esc(g)}</span>`).join('')}</p>
       <p class="plot">${esc(r.overview) || '<span class="muted">No description.</span>'}</p>
       <h3>Watch on</h3>
@@ -1144,6 +1182,7 @@ function refresh() {
 }
 
 function applyRoute() {
+  const deep = /^#t\/(.+)$/.exec(location.hash); // a shared link: /#t/<id>
   const want = { '#table': 'table', '#stats': 'stats', '#anime': 'anime', '#films': 'films', '#series': 'series' }[location.hash] ?? 'home';
   undoDrill(want);
   route = want;
@@ -1165,6 +1204,11 @@ function applyRoute() {
   closeFlyout();
   document.body.classList.remove('nav-open');
   refresh();
+  if (deep) {
+    history.replaceState(null, '', `${location.pathname}${location.search}#home`); // tidy the address bar
+    const r = byId.get(decodeURIComponent(deep[1]));
+    if (r) openFlyout(r); else showToast('That title is no longer on these services');
+  }
 }
 
 // ---------- events ----------
@@ -1249,7 +1293,12 @@ $('#statsbody').addEventListener('click', (e) => {
 });
 
 $('#scrim').onclick = closeFlyout;
-$('#flyout').addEventListener('click', (e) => { if (e.target.closest('#fly-close, [data-close-fly]')) closeFlyout(); });
+$('#flyout').addEventListener('click', (e) => {
+  if (e.target.closest('#fly-close, [data-close-fly]')) return closeFlyout();
+  const sh = e.target.closest('[data-share]'), cp = e.target.closest('[data-copy]');
+  if (sh) shareTitle(byId.get(sh.dataset.share), 'share');
+  else if (cp) shareTitle(byId.get(cp.dataset.copy), 'copy');
+});
 const closeNav = () => document.body.classList.remove('nav-open');
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeFlyout(); closeNav(); } });
 

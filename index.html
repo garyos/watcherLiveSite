@@ -4,12 +4,31 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>The Watcher</title>
+  <title>The Watcher: what to watch in the UK</title>
+  <meta name="description" content="Every film, series and anime on Netflix, Prime Video, Disney+, HBO Max and Crunchyroll in the UK, ranked and ready to dive into.">
+  <meta name="theme-color" content="#0e1116">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="site.webmanifest">
+  <!-- Link previews (WhatsApp, iMessage, Slack...). Crawlers need absolute URLs; https://stream.locurio.co.uk is filled in when the site is published. -->
+  <meta property="og:site_name" content="The Watcher">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="The Watcher: what to watch in the UK">
+  <meta property="og:description" content="Every film, series and anime on Netflix, Prime Video, Disney+, HBO Max and Crunchyroll, ranked and filterable. Find something good, then share it.">
+  <meta property="og:url" content="https://stream.locurio.co.uk/">
+  <meta property="og:image" content="https://stream.locurio.co.uk/og-card.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="The Watcher: what to watch in the UK">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="The Watcher: what to watch in the UK">
+  <meta name="twitter:description" content="Every film, series and anime on Netflix, Prime Video, Disney+, HBO Max and Crunchyroll, ranked and filterable.">
+  <meta name="twitter:image" content="https://stream.locurio.co.uk/og-card.jpg">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body class="loading">
   <header class="top">
-    <h1><a href="#home">The Watcher</a></h1>
+    <h1><a href="#home"><img class="logo" src="favicon.svg" alt="" width="24" height="24">The Watcher</a></h1>
     <div class="tabs" role="tablist">
       <a href="#home" id="tab-home" role="tab">Home</a>
       <a href="#films" id="tab-films" role="tab">Films</a>
@@ -143,6 +162,7 @@
     <span id="barcount" class="muted"></span>
   </div>
 
+  <div id="toast" role="status" aria-live="polite"></div>
   <div id="scrim" hidden></div>
   <aside id="flyout" aria-hidden="true" role="dialog" aria-label="Title details"></aside>
   <script src="app.js" defer></script>
