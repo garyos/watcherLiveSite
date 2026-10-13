@@ -48,6 +48,9 @@ const byId = new Map(data.map((r) => [r.id, r]));
 for (const r of data) {
   r.ageLabel = r.age || NR;
   r.languages ??= [];
+  r.countries ??= [];
+  // anime = animation made in Japan, or anything on Crunchyroll's animation-tagged library
+  r._anime = r.genres.includes('Animation') && (r.countries.includes('JP') || r.offers.some((o) => o.platform === 'crunchyroll'));
   r._wr = r.rating == null ? null : (r.votes / (r.votes + WR_M)) * r.rating + (WR_M / (r.votes + WR_M)) * WR_C;
   r._ts = Date.parse(r.releaseDate) || 0;
   r._n = { title: norm(r.title), people: norm(`${r.cast.join(' | ')} | ${r.directors.join(' | ')}`) };
@@ -97,7 +100,7 @@ const COLS = [
 
 // ---------- state ----------
 const fresh = () => ({
-  type: 'all', access: 'any', text: {}, num: {}, hasAwards: false, recent: false,
+  type: 'all', access: 'any', text: {}, num: {}, hasAwards: false, recent: false, anime: false,
   sets: { platforms: new Set(), genres: new Set(), ages: new Set(), actors: new Set(), directors: new Set(), langs: new Set(), audio: new Set(), subs: new Set() },
   sort: { key: 'title', dir: 1 }, page: 0, pageSize: 100,
 });
@@ -132,6 +135,7 @@ function matches(r) {
   if (s.sets.ages.size && !s.sets.ages.has(r.ageLabel)) return false;
   if (s.hasAwards && !r.awards) return false;
   if (s.recent && !isRecent(r)) return false;
+  if (s.anime && !r._anime) return false;
   const n = s.num;
   if (n.yearMin != null && !(r.year >= n.yearMin)) return false;
   if (n.yearMax != null && !(r.year <= n.yearMax)) return false;
@@ -141,6 +145,8 @@ function matches(r) {
   if (n.runtimeMax != null && !(r.runtime <= n.runtimeMax)) return false;
   if (n.seasonsMin != null && !(r.seasons >= n.seasonsMin)) return false;
   if (n.episodesMin != null && !(r.episodes >= n.episodesMin)) return false;
+  if (n.episodesMax != null && !(r.episodes <= n.episodesMax)) return false;
+  if (n.seasonsMax != null && !(r.seasons <= n.seasonsMax)) return false;
   if (n.awardsMin != null && !(r.awardCount >= n.awardsMin)) return false;
   for (const [k, v] of Object.entries(s.text)) {
     if (!v) continue;
@@ -278,6 +284,7 @@ function syncUI() {
   $(`input[name=access][value=${state.access}]`).checked = true;
   $('#hasAwards').checked = state.hasAwards;
   $('#recentOnly').checked = state.recent;
+  $('#animeOnly').checked = state.anime;
   $('#pagesize').value = String(state.pageSize);
   renderPicker('actors');
   renderPicker('directors');
@@ -358,6 +365,10 @@ const RUNTIMES = [
   { l: '180+', min: 180, max: null },
 ];
 let minVotes = 1000;
+const EPISODES = [
+  { l: '1–12', min: 1, max: 12 }, { l: '13–26', min: 13, max: 26 }, { l: '27–52', min: 27, max: 52 },
+  { l: '53–100', min: 53, max: 100 }, { l: '101–250', min: 101, max: 250 }, { l: '250+', min: 251, max: null },
+];
 
 const attrs = (i) => (i.a ? `data-a="${i.a}" data-v="${esc(i.v)}"${i.w != null ? ` data-w="${esc(i.w)}"` : ''}` : '');
 const pct = (n, t) => (t ? `${((n / t) * 100).toFixed(1)}%` : '–');
@@ -523,7 +534,29 @@ function renderStats(rows) {
   const nameBars = (field, kind, n = 12) => barlist([...tally(rows, (r) => r[field])].sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => ({ label: k, value: v, a: kind, v: k })));
   const votesSel = `<select id="minVotes" aria-label="Minimum votes">${[100, 1000, 10000, 50000].map((v) => `<option value="${v}"${v === minVotes ? ' selected' : ''}>≥ ${num(v)} votes</option>`).join('')}</select>`;
 
-  root.innerHTML = `${stats}<div class="grid">
+  let animeTiles = '', animeCards = '', scopeNote = '';
+  if (state.anime) {
+    const withEps = rows.filter((r) => r.type === 'series' && r.episodes > 0);
+    const dub = rows.filter((r) => r._aud.includes('en')).length;
+    const subOnly = rows.filter((r) => r._aud.length && !r._aud.includes('en')).length;
+    const noAudio = rows.length - dub - subOnly;
+    animeTiles = stat('Avg episodes per series', withEps.length ? Math.round(avg(withEps, (r) => r.episodes)) : '–', `${num(withEps.length)} series`)
+      + stat('English dub', num(dub), `${pct(dub, rows.length)} of titles`);
+    const dubItems = [
+      { label: 'English dub available', value: dub, color: PALETTE[2], a: 'audio', v: 'en' },
+      { label: 'Other audio only (subtitled)', value: subOnly, color: PALETTE[1] },
+      { label: 'Audio not listed', value: noAudio, color: '#3b4452' },
+    ].filter((i) => i.value);
+    const epItems = EPISODES.map((b, idx) => {
+      const n = withEps.filter((r) => r.episodes >= b.min && (b.max == null || r.episodes <= b.max)).length;
+      return { label: b.l, parts: [{ v: n, c: PALETTE[3] }], a: 'eps', v: idx, tick: true, tip: `${b.l} episodes: ${num(n)} series` };
+    });
+    animeCards = `${card('English dub availability', donut(dubItems), '', 'where the service lists audio')}
+    ${card('Episodes per series', columns(epItems, { height: 150 }))}`;
+    scopeNote = '<p class="scopenote">Showing anime only. Untick “Anime only” in the filters to see everything.</p>';
+  }
+
+  root.innerHTML = `${stats.slice(0, stats.lastIndexOf('</div>'))}${animeTiles}</div>${scopeNote}<div class="grid">${animeCards}
     ${card('Platforms', donut(platItems), '', 'titles on each service')}
     ${card('Films vs series', donut(typeItems))}
     ${card('Ad tiers', donut(adItems), '', 'Netflix Standard with Ads')}
@@ -557,6 +590,7 @@ function act(a, v, w) {
     access: [{ ads: 'Ad tier available', noads: 'No ad tier (ad-free only)' }[v], (s) => { s.access = v; }],
     year: [v === 'pre' ? 'Released before 1950' : `Released in ${v}`, (s) => { s.num.yearMin = v === 'pre' ? null : Number(v); s.num.yearMax = v === 'pre' ? 1949 : Number(v); }],
     rating: [`IMDb ${v}${v === '9' ? '+' : `–${v}.9`}`, (s) => { s.num.ratingMin = v === '1' ? 0 : Number(v); s.num.ratingMax = v === '9' ? 10 : Number(v) + 0.9; }],
+    eps: [`Episodes ${EPISODES[v]?.l}`, (s) => { s.type = 'series'; s.num.episodesMin = EPISODES[v].min; s.num.episodesMax = EPISODES[v].max; }],
     runtime: [`Runtime ${RUNTIMES[v]?.l} min`, (s) => { s.num.runtimeMin = RUNTIMES[v].min; s.num.runtimeMax = RUNTIMES[v].max; }],
     lang: [`Original language: ${v}`, (s) => { s.sets.langs = new Set([v]); }],
     audio: [`Audio: ${langName(v)}`, (s) => { s.sets.audio = new Set([v]); }],
@@ -569,7 +603,7 @@ function act(a, v, w) {
   if (m) drillTo(m[0], m[1]);
 }
 
-// ---------- home (landing page) ----------
+// ---------- boards: the Home and Anime landing pages share one engine ----------
 const compact = new Intl.NumberFormat('en-GB', { notation: 'compact', maximumFractionDigits: 1 });
 const released = (r) => !!r.releaseDate && r.releaseDate <= TODAY;
 const hasRating = (r) => r._wr != null;
@@ -578,63 +612,11 @@ const fmtRate = (r) => ({ main: r.rating != null ? `★ ${r.rating}` : '–', su
 const fmtVotes = (r) => ({ main: `${compact.format(r.votes)} votes`, sub: star(r) });
 const fmtDate = (r) => ({ main: dateFmt.format(new Date(r.releaseDate + 'T00:00:00Z')), sub: star(r) });
 const fmtAward = (r) => ({ main: `${r.awardCount} award${r.awardCount > 1 ? 's' : ''}`, sub: star(r) });
+const fmtEps = (r) => ({ main: `${num(r.episodes)} episodes`, sub: star(r) });
 const byRating = (s) => { s.sort = { key: 'rating', dir: -1 }; };
 const byRelease = (s) => { s.sort = { key: 'release', dir: -1 }; };
 
-const HGROUPS = [
-  { id: 'featured', title: 'Featured', cap: 'Ranked across everything you can watch', color: PALETTE[0] },
-  { id: 'spotlight', title: 'Spotlight', cap: 'Handpicked angles on the catalogue', color: PALETTE[1] },
-  { id: 'genres', title: 'By genre', cap: 'The best of each genre, weighted by IMDb votes', color: PALETTE[2] },
-  { id: 'decades', title: 'By decade', cap: 'From the latest hits back to the classics', color: PALETTE[4] },
-  { id: 'languages', title: 'World cinema & TV', cap: 'Best of each original language beyond English', color: PALETTE[3] },
-];
-const LISTS = [];
-const addList = (group, id, title, sub, pred, score, fmt, tbl = byRating) => LISTS.push({ group, id, title, sub, pred, score, fmt, tbl });
-
-addList('featured', 'popular', 'Most popular', 'By IMDb votes, all platforms', (r) => r.votes > 0, (r) => r.votes, fmtVotes);
-addList('featured', 'popnew', 'Popular new releases', 'Released in the last two years', (r) => released(r) && r.releaseDate >= monthsAgo(24) && r.votes > 0, (r) => r.votes, fmtVotes,
-  (s) => { s.num.yearMin = new Date().getFullYear() - 2; byRelease(s); });
-addList('featured', 'newest', 'Latest arrivals', 'Newest releases first', released, (r) => r._ts, fmtDate, byRelease);
-addList('featured', 'toprated', 'Top rated', 'Best IMDb score, weighted by votes', hasRating, (r) => r._wr, fmtRate);
-addList('featured', 'awards', 'Award winners', 'Most awards won', (r) => r.awardCount > 0, (r) => r.awardCount * 100 + (r.rating || 0), fmtAward,
-  (s) => { s.num.awardsMin = 1; s.sort = { key: 'awards', dir: -1 }; });
-
-addList('spotlight', 'quick', 'Quick watches', 'Films under 95 minutes', (r) => r.type === 'film' && r.runtime && r.runtime <= 95 && hasRating(r), (r) => r._wr, fmtRate,
-  (s) => { s.type = 'film'; s.num.runtimeMax = 95; byRating(s); });
-addList('spotlight', 'binge', 'Binge-worthy series', 'Three or more seasons', (r) => r.type === 'series' && r.seasons >= 3 && hasRating(r), (r) => r._wr, fmtRate,
-  (s) => { s.type = 'series'; s.num.seasonsMin = 3; byRating(s); });
-addList('spotlight', 'family', 'Family night', 'Rated U or PG', (r) => (r.age === 'U' || r.age === 'PG') && hasRating(r), (r) => r._wr, fmtRate,
-  (s) => { s.sets.ages = new Set(['U', 'PG']); byRating(s); });
-addList('spotlight', 'gems', 'Hidden gems', 'Rated 7.5+ with under 10k votes', (r) => r.rating >= 7.5 && r.votes >= 300 && r.votes < 10000, (r) => r.rating * 1000 + Math.min(r.votes, 999), fmtRate,
-  (s) => { s.num.ratingMin = 7.5; byRating(s); });
-addList('spotlight', 'classics', 'Classics', 'Released before 1980', (r) => r.year < 1980 && hasRating(r), (r) => r._wr, fmtRate, (s) => { s.num.yearMax = 1979; byRating(s); });
-
-for (const [id, t] of [['quick', 'film'], ['binge', 'series']]) LISTS.find((l) => l.id === id).type = t; // inherently one kind: no toggle
-LISTS.find((l) => l.id === 'classics').range = 'all'; // nothing from the last year is a classic: no period toggle
-
-for (const [g, n] of [...genreCounts].sort((a, b) => b[1] - a[1])) {
-  if (n < 40) continue;
-  addList('genres', `genre-${g}`, g, `${num(n)} titles`, (r) => r.genres.includes(g) && hasRating(r), (r) => r._wr, fmtRate, (s) => { s.sets.genres.add(g); byRating(s); });
-}
-for (const [label, min, max] of [['2020s', 2020, 2029], ['2010s', 2010, 2019], ['2000s', 2000, 2009], ['1990s', 1990, 1999], ['1980s', 1980, 1989], ['1970s & earlier', 0, 1979]]) {
-  addList('decades', `dec-${min}`, `The ${label}`, 'Best rated of the era', (r) => r.year >= min && r.year <= max && hasRating(r), (r) => r._wr, fmtRate,
-    (s) => { s.num.yearMin = min || null; s.num.yearMax = max; byRating(s); });
-  if (max < Number(RECENT_FROM.slice(0, 4))) LISTS[LISTS.length - 1].range = 'all'; // an old decade can't have recent titles
-}
-for (const [l, n] of origCounts.filter(([l]) => l !== 'English').slice(0, 8)) {
-  addList('languages', `lang-${l}`, l, `${num(n)} titles`, (r) => r.languages.includes(l) && hasRating(r), (r) => r._wr, fmtRate, (s) => { s.sets.langs = new Set([l]); byRating(s); });
-}
-
 const ALL_PLATS = meta.platforms.map((p) => p.id);
-const homePlat = new Set(ALL_PLATS); // global platform filter: every platform, or just one
-const listPlat = new Map(); // per-list overrides
-let homeType = 'all'; // global film/series filter
-const listType = new Map();
-let homeRange = 'all'; // global period: 'all' time or 'recent' (last 12 months)
-const listRange = new Map();
-const platsFor = (id) => listPlat.get(id) ?? homePlat;
-const typeFor = (id) => LISTS.find((l) => l.id === id).type ?? listType.get(id) ?? homeType;
-const rangeFor = (id) => LISTS.find((l) => l.id === id).range ?? listRange.get(id) ?? homeRange;
 const isAll = (set) => set.size === ALL_PLATS.length;
 // multi-select: from "everything" the first click shows just that platform, further clicks add or remove
 // platforms, and deselecting the last one falls back to everything
@@ -644,138 +626,281 @@ const pickPlat = (cur, id) => {
   next.has(id) ? next.delete(id) : next.add(id);
   return next.size ? next : new Set(ALL_PLATS);
 };
-
-function topOf(list, plats, type, range, limit = 20) {
-  const hits = [];
-  for (const r of data) {
-    if ((type === 'all' || r.type === type) && (range !== 'recent' || isRecent(r)) && r.offers.some((o) => plats.has(o.platform)) && list.pred(r)) hits.push(r);
-  }
-  const scored = hits.map((r) => [list.score(r), r]).sort((a, b) => b[0] - a[0] || b[1].votes - a[1].votes);
-  return { rows: scored.slice(0, limit).map((x) => x[1]), total: hits.length };
-}
-
 const platChips = (attr, extra, plats) => meta.platforms.map((p) =>
   `<button type="button" class="pchip" style="--c:${esc(p.color)}" aria-pressed="${plats.has(p.id)}" ${attr}="${esc(p.id)}" ${extra}>${esc(p.name)}</button>`).join('');
 const typeSeg = (attr, extra, cur) => `<span class="seg2" role="group" aria-label="Films or series">${[['film', 'Films'], ['series', 'Series']].map(([v, l]) =>
   `<button type="button" aria-pressed="${cur === 'all' || cur === v}" ${attr}="${v}" ${extra}>${l}</button>`).join('')}</span>`;
-
 const rangeSeg = (attr, extra, cur) => `<span class="seg2" role="group" aria-label="Time period">${[['recent', 'Last year'], ['all', 'All time']].map(([v, l]) =>
   `<button type="button" aria-pressed="${cur === v}" ${attr}="${v}" ${extra}>${l}</button>`).join('')}</span>`;
-
 const sizeOf = (r) => (r.type === 'series'
   ? [r.seasons && `${r.seasons} season${r.seasons > 1 ? 's' : ''}`, r.episodes && `${num(r.episodes)} episode${r.episodes > 1 ? 's' : ''}`].filter(Boolean).join(', ')
   : '');
 const kindOf = (r) => [r.year, r.type === 'film' ? 'Film' : 'Series', sizeOf(r)].filter(Boolean).join(' · ');
 
-function listRows(list, rows) {
-  return `<ol class="hrows">${rows.map((r, i) => {
-    const m = list.fmt(r);
-    return `<li class="hrow" data-open="${esc(r.id)}"><span class="rk">${i + 1}</span>
-      <span class="th">${r.poster ? `<img loading="lazy" decoding="async" alt="" referrerpolicy="no-referrer" src="${POSTER(r.poster, 's166')}">` : ''}</span>
-      <span class="hmain"><b>${esc(r.title)}</b><small>${esc(kindOf(r))}</small>${r.genres.length ? `<small class="g">${esc(r.genres.slice(0, 3).join(', '))}</small>` : ''}
-        <span class="pls">${r.offers.map((o) => `<i class="badge sm" style="background:${esc(platforms[o.platform].color)}">${esc(platforms[o.platform].name)}</i>`).join('')}</span></span>
-      <span class="hmet"><b>${esc(m.main)}</b><small>${esc(m.sub)}</small></span></li>`;
-  }).join('')}</ol>`;
+const makeAdder = (lists) => (group, id, title, sub, pred, score, fmt, tbl = byRating) => {
+  const l = { group, id, title, sub, pred, score, fmt, tbl };
+  lists.push(l);
+  return l;
+};
+// the five lists every board starts with
+function addFeatured(add) {
+  add('featured', 'popular', 'Most popular', 'By IMDb votes, all platforms', (r) => r.votes > 0, (r) => r.votes, fmtVotes);
+  add('featured', 'popnew', 'Popular new releases', 'Released in the last two years', (r) => released(r) && r.releaseDate >= monthsAgo(24) && r.votes > 0, (r) => r.votes, fmtVotes,
+    (s) => { s.num.yearMin = new Date().getFullYear() - 2; byRelease(s); });
+  add('featured', 'newest', 'Latest arrivals', 'Newest releases first', released, (r) => r._ts, fmtDate, byRelease);
+  add('featured', 'toprated', 'Top rated', 'Best IMDb score, weighted by votes', hasRating, (r) => r._wr, fmtRate);
+  add('featured', 'awards', 'Award winners', 'Most awards won', (r) => r.awardCount > 0, (r) => r.awardCount * 100 + (r.rating || 0), fmtAward,
+    (s) => { s.num.awardsMin = 1; s.sort = { key: 'awards', dir: -1 }; });
+}
+const decadeLists = (add, defs) => {
+  for (const [label, min, max] of defs) {
+    const l = add('decades', `dec-${min}`, `The ${label}`, 'Best rated of the era', (r) => r.year >= min && r.year <= max && hasRating(r), (r) => r._wr, fmtRate,
+      (s) => { s.num.yearMin = min || null; s.num.yearMax = max; byRating(s); });
+    if (max < Number(RECENT_FROM.slice(0, 4))) l.range = 'all'; // an old decade can't have recent titles
+  }
+};
+
+// ----- Home lists -----
+const HOME_GROUPS = [
+  { id: 'featured', title: 'Featured', cap: 'Ranked across everything you can watch', color: PALETTE[0] },
+  { id: 'spotlight', title: 'Spotlight', cap: 'Handpicked angles on the catalogue', color: PALETTE[1] },
+  { id: 'genres', title: 'By genre', cap: 'The best of each genre, weighted by IMDb votes', color: PALETTE[2] },
+  { id: 'decades', title: 'By decade', cap: 'From the latest hits back to the classics', color: PALETTE[4] },
+  { id: 'languages', title: 'World cinema & TV', cap: 'Best of each original language beyond English', color: PALETTE[3] },
+];
+const HOME_LISTS = [];
+const addHome = makeAdder(HOME_LISTS);
+addFeatured(addHome);
+addHome('spotlight', 'quick', 'Quick watches', 'Films under 95 minutes', (r) => r.type === 'film' && r.runtime && r.runtime <= 95 && hasRating(r), (r) => r._wr, fmtRate,
+  (s) => { s.type = 'film'; s.num.runtimeMax = 95; byRating(s); }).type = 'film'; // inherently one kind: no toggle
+addHome('spotlight', 'binge', 'Binge-worthy series', 'Three or more seasons', (r) => r.type === 'series' && r.seasons >= 3 && hasRating(r), (r) => r._wr, fmtRate,
+  (s) => { s.type = 'series'; s.num.seasonsMin = 3; byRating(s); }).type = 'series';
+addHome('spotlight', 'family', 'Family night', 'Rated U or PG', (r) => (r.age === 'U' || r.age === 'PG') && hasRating(r), (r) => r._wr, fmtRate,
+  (s) => { s.sets.ages = new Set(['U', 'PG']); byRating(s); });
+addHome('spotlight', 'gems', 'Hidden gems', 'Rated 7.5+ with under 10k votes', (r) => r.rating >= 7.5 && r.votes >= 300 && r.votes < 10000, (r) => r.rating * 1000 + Math.min(r.votes, 999), fmtRate,
+  (s) => { s.num.ratingMin = 7.5; byRating(s); });
+addHome('spotlight', 'classics', 'Classics', 'Released before 1980', (r) => r.year < 1980 && hasRating(r), (r) => r._wr, fmtRate, (s) => { s.num.yearMax = 1979; byRating(s); }).range = 'all'; // nothing recent is a classic
+for (const [g, n] of [...genreCounts].sort((a, b) => b[1] - a[1])) {
+  if (n < 40) continue;
+  addHome('genres', `genre-${g}`, g, `${num(n)} titles`, (r) => r.genres.includes(g) && hasRating(r), (r) => r._wr, fmtRate, (s) => { s.sets.genres.add(g); byRating(s); });
+}
+decadeLists(addHome, [['2020s', 2020, 2029], ['2010s', 2010, 2019], ['2000s', 2000, 2009], ['1990s', 1990, 1999], ['1980s', 1980, 1989], ['1970s & earlier', 0, 1979]]);
+for (const [l, n] of origCounts.filter(([l]) => l !== 'English').slice(0, 8)) {
+  addHome('languages', `lang-${l}`, l, `${num(n)} titles`, (r) => r.languages.includes(l) && hasRating(r), (r) => r._wr, fmtRate, (s) => { s.sets.langs = new Set([l]); byRating(s); });
 }
 
-function renderListBody(id) {
-  const list = LISTS.find((l) => l.id === id);
-  const el = $(`#hl-${CSS.escape(id)} .lbody`);
-  if (!el) return;
-  const plats = platsFor(id);
-  const type = typeFor(id);
-  const range = rangeFor(id);
-  const { rows, total } = topOf(list, plats, type, range);
-  const segs = `${list.type ? '' : typeSeg('data-lt', `data-list="${esc(id)}"`, type)}${list.range ? '' : rangeSeg('data-lr', `data-list="${esc(id)}"`, range)}`;
-  el.innerHTML = `<div class="ltools"><div class="ptoggles">${platChips('data-lp', `data-list="${esc(id)}"`, plats)}</div>${segs ? `<div class="ptoggles">${segs}</div>` : ''}</div>
-    ${rows.length ? listRows(list, rows) : `<p class="muted pad">${range === 'recent' ? 'Nothing released in the last year matches these filters.' : 'Nothing matches these filters.'}</p>`}
-    <div class="lfoot"><span class="muted">Top ${rows.length} of ${num(total)}${range === 'recent' ? ' from the last year' : ''}</span><button type="button" class="link" data-table="${esc(id)}">See all in table →</button></div>`;
-  el.dataset.ready = '1';
+// ----- Anime lists: animation made in Japan, or anything on Crunchyroll, across every platform -----
+const animeRows = data.filter((r) => r._anime);
+const ANIME_GROUPS = [
+  { id: 'featured', title: 'Featured', cap: 'Ranked across all the anime you can watch', color: PALETTE[0] },
+  { id: 'spotlight', title: 'Spotlight', cap: 'Dubs, long-runners, short series and hidden gems', color: PALETTE[1] },
+  { id: 'genres', title: 'By genre', cap: 'The best of each genre, weighted by IMDb votes', color: PALETTE[2] },
+  { id: 'decades', title: 'By era', cap: 'From modern hits back to the classics', color: PALETTE[4] },
+  { id: 'studios', title: 'By studio', cap: 'Where the studio is known', color: PALETTE[3] },
+];
+const ANIME_LISTS = [];
+const addAnime = makeAdder(ANIME_LISTS);
+addFeatured(addAnime);
+addAnime('spotlight', 'dub', 'English dubbed', 'English audio available', (r) => r._aud.includes('en') && hasRating(r), (r) => r._wr, fmtRate,
+  (s) => { s.sets.audio = new Set(['en']); byRating(s); });
+addAnime('spotlight', 'movies', 'Anime films', 'Feature-length anime', (r) => r.type === 'film' && hasRating(r), (r) => r._wr, fmtRate,
+  (s) => { s.type = 'film'; byRating(s); }).type = 'film';
+addAnime('spotlight', 'long', 'Long-runners', 'Series with 100+ episodes', (r) => r.type === 'series' && r.episodes >= 100, (r) => r.episodes, fmtEps,
+  (s) => { s.type = 'series'; s.num.episodesMin = 100; s.sort = { key: 'episodes', dir: -1 }; }).type = 'series';
+addAnime('spotlight', 'short', 'Short & sweet', 'Series of 13 episodes or fewer', (r) => r.type === 'series' && r.episodes > 0 && r.episodes <= 13 && hasRating(r), (r) => r._wr, fmtEps,
+  (s) => { s.type = 'series'; s.num.episodesMax = 13; byRating(s); }).type = 'series';
+addAnime('spotlight', 'gems', 'Hidden gems', 'Rated 7.5+ with under 10k votes', (r) => r.rating >= 7.5 && r.votes >= 300 && r.votes < 10000, (r) => r.rating * 1000 + Math.min(r.votes, 999), fmtRate,
+  (s) => { s.num.ratingMin = 7.5; byRating(s); });
+const animeGenres = new Map();
+for (const r of animeRows) for (const g of r.genres) if (g !== 'Animation') animeGenres.set(g, (animeGenres.get(g) ?? 0) + 1);
+for (const [g, n] of [...animeGenres].sort((a, b) => b[1] - a[1])) {
+  if (n < 25) continue;
+  addAnime('genres', `genre-${g}`, g, `${num(n)} titles`, (r) => r.genres.includes(g) && hasRating(r), (r) => r._wr, fmtRate, (s) => { s.sets.genres.add(g); byRating(s); });
+}
+decadeLists(addAnime, [['2020s', 2020, 2029], ['2010s', 2010, 2019], ['2000s', 2000, 2009], ['1990s & earlier', 0, 1999]]);
+const animeStudios = new Map();
+for (const r of animeRows) for (const st of r.studios) animeStudios.set(st, (animeStudios.get(st) ?? 0) + 1);
+for (const [st, n] of [...animeStudios].sort((a, b) => b[1] - a[1]).filter(([, n]) => n >= 6).slice(0, 12)) {
+  addAnime('studios', `studio-${st}`, st, `${num(n)} titles`, (r) => r.studios.includes(st) && hasRating(r), (r) => r._wr, fmtRate, (s) => { s.text.studios = lc(st); byRating(s); });
 }
 
-function renderRail() {
-  const rows = topOf(LISTS.find((l) => l.id === 'popnew'), homePlat, homeType, homeRange, 80).rows.filter((r) => r.poster).slice(0, 16);
-  $('#rail').innerHTML = rows.map((r) =>
-    `<button type="button" class="pc" data-open="${esc(r.id)}"><img loading="lazy" decoding="async" alt="Poster for ${esc(r.title)}" referrerpolicy="no-referrer" src="${POSTER(r.poster, 's276')}"><b>${esc(r.title)}</b><small>${[r.year, r.type === 'series' && r.seasons ? `${r.seasons} season${r.seasons > 1 ? 's' : ''}` : '', star(r)].filter(Boolean).join(' · ')}</small></button>`).join('')
-    || '<p class="muted pad">Nothing matches these filters.</p>';
+// one engine drives both pages: lists, platform / film-series / period controls, expand all, table drill-down
+function createBoard(cfg) {
+  const { lists, groups, from } = cfg;
+  const pool = data.filter(cfg.subset);
+  const plat = new Set(ALL_PLATS); // global platform filter: every platform, or a chosen few
+  const listPlat = new Map(); // per-list overrides
+  let gType = 'all';
+  const listType = new Map();
+  let gRange = 'all'; // 'all' time or 'recent' (last 12 months)
+  const listRange = new Map();
+  const root = () => $(cfg.root);
+  const find = (id) => lists.find((l) => l.id === id);
+  const platsFor = (id) => listPlat.get(id) ?? plat;
+  const typeFor = (id) => find(id).type ?? listType.get(id) ?? gType;
+  const rangeFor = (id) => find(id).range ?? listRange.get(id) ?? gRange;
+  const el = (sel) => $(sel, root());
+  const bodyOf = (id) => el(`details[data-list-id="${CSS.escape(id)}"] .lbody`);
+
+  function topOf(list, plats, type, range, limit = 20) {
+    const hits = [];
+    for (const r of pool) {
+      if ((type === 'all' || r.type === type) && (range !== 'recent' || isRecent(r)) && r.offers.some((o) => plats.has(o.platform)) && list.pred(r)) hits.push(r);
+    }
+    const scored = hits.map((r) => [list.score(r), r]).sort((a, b) => b[0] - a[0] || b[1].votes - a[1].votes);
+    return { rows: scored.slice(0, limit).map((x) => x[1]), total: hits.length };
+  }
+
+  function listRows(list, rows) {
+    return `<ol class="hrows">${rows.map((r, i) => {
+      const m = list.fmt(r);
+      return `<li class="hrow" data-open="${esc(r.id)}"><span class="rk">${i + 1}</span>
+        <span class="th">${r.poster ? `<img loading="lazy" decoding="async" alt="" referrerpolicy="no-referrer" src="${POSTER(r.poster, 's166')}">` : ''}</span>
+        <span class="hmain"><b>${esc(r.title)}</b><small>${esc(kindOf(r))}</small>${r.genres.length ? `<small class="g">${esc(r.genres.slice(0, 3).join(', '))}</small>` : ''}
+          <span class="pls">${r.offers.map((o) => `<i class="badge sm" style="background:${esc(platforms[o.platform].color)}">${esc(platforms[o.platform].name)}</i>`).join('')}</span></span>
+        <span class="hmet"><b>${esc(m.main)}</b><small>${esc(m.sub)}</small></span></li>`;
+    }).join('')}</ol>`;
+  }
+
+  function renderListBody(id) {
+    const list = find(id);
+    const body = bodyOf(id);
+    if (!list || !body) return;
+    const plats = platsFor(id);
+    const type = typeFor(id);
+    const range = rangeFor(id);
+    const { rows, total } = topOf(list, plats, type, range);
+    const segs = `${list.type ? '' : typeSeg('data-lt', `data-list="${esc(id)}"`, type)}${list.range ? '' : rangeSeg('data-lr', `data-list="${esc(id)}"`, range)}`;
+    body.innerHTML = `<div class="ltools"><div class="ptoggles">${platChips('data-lp', `data-list="${esc(id)}"`, plats)}</div>${segs ? `<div class="ptoggles">${segs}</div>` : ''}</div>
+      ${rows.length ? listRows(list, rows) : `<p class="muted pad">${range === 'recent' ? 'Nothing released in the last year matches these filters.' : 'Nothing matches these filters.'}</p>`}
+      <div class="lfoot"><span class="muted">Top ${rows.length} of ${num(total)}${range === 'recent' ? ' from the last year' : ''}</span><button type="button" class="link" data-table="${esc(id)}">See all in table →</button></div>`;
+    body.dataset.ready = '1';
+  }
+
+  function renderRail() {
+    const rail = find('popnew');
+    const rows = topOf(rail, plat, gType, gRange, 80).rows.filter((r) => r.poster).slice(0, 16);
+    el('.rail').innerHTML = rows.map((r) =>
+      `<button type="button" class="pc" data-open="${esc(r.id)}"><img loading="lazy" decoding="async" alt="Poster for ${esc(r.title)}" referrerpolicy="no-referrer" src="${POSTER(r.poster, 's276')}"><b>${esc(r.title)}</b><small>${[r.year, r.type === 'series' && r.seasons ? `${r.seasons} season${r.seasons > 1 ? 's' : ''}` : '', star(r)].filter(Boolean).join(' · ')}</small></button>`).join('')
+      || '<p class="muted pad">Nothing matches these filters.</p>';
+  }
+
+  // re-render everything that follows the global platform / film-or-series / period choices
+  function sync() {
+    el('.gplat').innerHTML = platChips('data-gp', '', plat);
+    el('.gtype').innerHTML = typeSeg('data-gt', '', gType);
+    el('.grange').innerHTML = rangeSeg('data-gr', '', gRange);
+    renderRail();
+    for (const d of $$('details.hl[open]', root())) renderListBody(d.dataset.listId);
+  }
+
+  function build() {
+    const counts = meta.platforms.map((p) => [p, pool.filter((r) => r.offers.some((o) => o.platform === p.id)).length]);
+    const gs = groups.filter((g) => lists.some((l) => l.group === g.id));
+    root().innerHTML = `${cfg.hero(pool, counts)}
+      <div class="jump" role="navigation" aria-label="Sections">
+        <button type="button" data-jump="${cfg.p}h-rail">Trending</button>${gs.map((g) => `<button type="button" data-jump="${cfg.p}h-${g.id}">${esc(g.title)}</button>`).join('')}
+      </div>
+      <div class="hwrap">
+        <div class="hexp"><button type="button" data-expand="open">Expand all</button><button type="button" data-expand="close">Collapse all</button></div>
+        <section class="hgroup" id="${cfg.p}h-rail"><div class="ghead"><h3>Trending now</h3><p>Popular new releases</p></div><div class="rail"></div></section>
+        ${gs.map((g) => `<section class="hgroup" id="${cfg.p}h-${g.id}" style="--g:${g.color}"><div class="ghead"><h3>${esc(g.title)}</h3><p>${esc(g.cap)}</p></div>
+          <div class="lists">${lists.filter((l) => l.group === g.id).map((l) => `<details class="hl" id="hl-${cfg.p}${esc(l.id)}" data-list-id="${esc(l.id)}"><summary><span class="ht"><b>${esc(l.title)}</b><small>${esc(l.sub)}</small></span><span class="chev" aria-hidden="true"></span></summary><div class="lbody"></div></details>`).join('')}</div></section>`).join('')}
+      </div>
+      <div class="hbar">
+        <div class="hctl">
+          <div class="ptoggles hplat" role="group" aria-label="Platform for all lists"><span class="muted">Platform</span><span class="gplat ptoggles"></span></div>
+          <div class="ptoggles" role="group" aria-label="Films or series for all lists"><span class="muted">Show</span><span class="gtype"></span></div>
+          <div class="ptoggles" role="group" aria-label="Time period for all lists"><span class="muted">Period</span><span class="grange"></span></div>
+          <div class="expcol"><button type="button" data-expand="open">Expand all</button><button type="button" data-expand="close">Collapse all</button></div>
+        </div>
+      </div>`;
+    sync();
+  }
+
+  function openListInTable(id) {
+    const list = find(id);
+    const plats = platsFor(id);
+    const type = typeFor(id);
+    const range = rangeFor(id);
+    const label = [cfg.name && `${cfg.name}: ${list.title}` || list.title, !isAll(plats) && meta.platforms.filter((p) => plats.has(p.id)).map((p) => p.name).join(', '), type !== 'all' && (type === 'film' ? 'Films' : 'Series'), range === 'recent' && 'Last year'].filter(Boolean).join(' · ');
+    drillTo(label, (s) => {
+      cfg.base?.(s);
+      if (!isAll(plats)) s.sets.platforms = new Set(plats);
+      list.tbl(s);
+      if (type !== 'all') s.type = type;
+      if (range === 'recent') s.recent = true;
+    }, { clean: true });
+  }
+
+  const view = $(cfg.view);
+  view.addEventListener('click', (e) => {
+    const t = e.target;
+    const open = t.closest('[data-open]');
+    if (open) return openFlyout(byId.get(open.dataset.open));
+    const gp = t.closest('[data-gp]');
+    if (gp) { const next = pickPlat(plat, gp.dataset.gp); plat.clear(); next.forEach((p) => plat.add(p)); listPlat.clear(); return sync(); }
+    const gt = t.closest('[data-gt]');
+    if (gt) { gType = gType === gt.dataset.gt ? 'all' : gt.dataset.gt; listType.clear(); return sync(); }
+    const gr = t.closest('[data-gr]');
+    if (gr) { gRange = gRange === gr.dataset.gr && gr.dataset.gr === 'recent' ? 'all' : gr.dataset.gr; listRange.clear(); return sync(); } // the active "Last year" goes back to all time
+    const lp = t.closest('[data-lp]');
+    if (lp) { listPlat.set(lp.dataset.list, pickPlat(platsFor(lp.dataset.list), lp.dataset.lp)); return renderListBody(lp.dataset.list); }
+    const lt = t.closest('[data-lt]');
+    if (lt) { const id = lt.dataset.list; listType.set(id, typeFor(id) === lt.dataset.lt ? 'all' : lt.dataset.lt); return renderListBody(id); }
+    const lr = t.closest('[data-lr]');
+    if (lr) { const id = lr.dataset.list; listRange.set(id, rangeFor(id) === lr.dataset.lr && lr.dataset.lr === 'recent' ? 'all' : lr.dataset.lr); return renderListBody(id); }
+    const tb = t.closest('[data-table]');
+    if (tb) return openListInTable(tb.dataset.table);
+    const cta = t.closest('[data-cta]');
+    if (cta) return cfg.onCta?.(cta.dataset.cta);
+    const jump = t.closest('[data-jump]');
+    if (jump) return document.getElementById(jump.dataset.jump)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const ex = t.closest('[data-expand]');
+    if (ex) $$('details.hl', root()).forEach((d) => { d.open = ex.dataset.expand === 'open'; });
+  });
+  // lists render their rows the first time they are opened
+  view.addEventListener('toggle', (e) => {
+    const d = e.target;
+    if (d.matches?.('details.hl') && d.open && !d.querySelector('.lbody[data-ready]')) renderListBody(d.dataset.listId);
+  }, true);
+  view.addEventListener('error', (e) => { if (e.target.tagName === 'IMG') e.target.style.visibility = 'hidden'; }, true);
+  return { build };
 }
 
-function buildHome() {
-  const counts = meta.platforms.map((p) => [p, data.filter((r) => r.offers.some((o) => o.platform === p.id)).length]);
-  $('#homebody').innerHTML = `
+const platformPills = (counts) => `<ul class="pills">${counts.map(([p, n]) => `<li><i style="background:${esc(p.color)}"></i>${esc(p.name)} <b>${num(n)}</b></li>`).join('')}</ul>`;
+const platformNames = () => meta.platforms.map((p) => p.name);
+const joinNames = (a) => `${a.slice(0, -1).join(', ')} and ${a.at(-1)}`;
+
+const homeBoard = createBoard({
+  root: '#homebody', view: '#view-home', p: '', from: 'home', lists: HOME_LISTS, groups: HOME_GROUPS, subset: () => true,
+  hero: (pool, counts) => `
     <div class="hero">
       <span class="eyebrow">The Watcher</span>
       <h2>What to watch in the UK</h2>
-      <p>Every film and series included with <b>Netflix</b>, <b>Prime Video</b>, <b>Disney+</b> and <b>HBO Max</b>. Ranked, filterable and ready to dive into.</p>
+      <p>Every film and series included with ${joinNames(platformNames().map((n) => `<b>${esc(n)}</b>`))}. Ranked, filterable and ready to dive into.</p>
       <form id="homesearch" role="search"><div class="sbox"><input type="search" id="homeq" autocomplete="off" placeholder="Search titles, actors, directors…" aria-label="Search titles" aria-controls="suggest"><ul id="suggest" role="listbox" hidden></ul></div><button type="submit" class="primary">Search</button></form>
-      <div class="cta"><a class="cta-a" href="#table">Browse the table</a><a class="cta-a" href="#stats">Explore statistics</a></div>
-      <ul class="pills">${counts.map(([p, n]) => `<li><i style="background:${esc(p.color)}"></i>${esc(p.name)} <b>${num(n)}</b></li>`).join('')}</ul>
-    </div>
-    <div class="jump" role="navigation" aria-label="Sections">
-      <button type="button" data-jump="h-rail">Trending</button>${HGROUPS.map((g) => `<button type="button" data-jump="h-${g.id}">${esc(g.title)}</button>`).join('')}
-    </div>
-    <div class="hwrap">
-      <div class="hexp"><button type="button" data-expand="open">Expand all</button><button type="button" data-expand="close">Collapse all</button></div>
-      <section class="hgroup" id="h-rail"><div class="ghead"><h3>Trending now</h3><p>Popular new releases</p></div><div class="rail" id="rail"></div></section>
-      ${HGROUPS.map((g) => `<section class="hgroup" id="h-${g.id}" style="--g:${g.color}"><div class="ghead"><h3>${esc(g.title)}</h3><p>${esc(g.cap)}</p></div>
-        <div class="lists">${LISTS.filter((l) => l.group === g.id).map((l) => `<details class="hl" id="hl-${esc(l.id)}"><summary><span class="ht"><b>${esc(l.title)}</b><small>${esc(l.sub)}</small></span><span class="chev" aria-hidden="true"></span></summary><div class="lbody"></div></details>`).join('')}</div></section>`).join('')}
-    </div>
-    <div class="hbar">
-      <div class="hctl">
-        <div class="ptoggles hplat" role="group" aria-label="Platform for all lists"><span class="muted">Platform</span><span id="gplat" class="ptoggles"></span></div>
-        <div class="ptoggles" role="group" aria-label="Films or series for all lists"><span class="muted">Show</span><span id="gtype"></span></div>
-        <div class="ptoggles" role="group" aria-label="Time period for all lists"><span class="muted">Period</span><span id="grange"></span></div>
-        <div class="expcol"><button type="button" data-expand="open">Expand all</button><button type="button" data-expand="close">Collapse all</button></div>
-      </div>
-    </div>`;
-  syncGlobal();
-}
+      <div class="cta"><a class="cta-a" href="#anime">Anime</a><a class="cta-a" href="#table">Browse the table</a><a class="cta-a" href="#stats">Explore statistics</a></div>
+      ${platformPills(counts)}
+    </div>`,
+});
 
-// re-render everything that follows the global platform / film-or-series choice
-function syncGlobal() {
-  $('#gplat').innerHTML = platChips('data-gp', '', homePlat);
-  $('#gtype').innerHTML = typeSeg('data-gt', '', homeType);
-  $('#grange').innerHTML = rangeSeg('data-gr', '', homeRange);
-  renderRail();
-  for (const d of $$('#homebody details.hl[open]')) renderListBody(d.id.slice(3));
-}
-function setGlobalPlat(id) {
-  const next = pickPlat(homePlat, id);
-  homePlat.clear();
-  next.forEach((p) => homePlat.add(p));
-  listPlat.clear();
-  syncGlobal();
-}
-function setGlobalType(t) {
-  homeType = homeType === t ? 'all' : t;
-  listType.clear();
-  syncGlobal();
-}
-function setGlobalRange(v) {
-  homeRange = homeRange === v && v === 'recent' ? 'all' : v; // clicking the active "Last year" goes back to all time
-  listRange.clear();
-  syncGlobal();
-}
-function setListRange(id, v) {
-  listRange.set(id, rangeFor(id) === v && v === 'recent' ? 'all' : v);
-  renderListBody(id);
-}
-function setListPlat(id, p) {
-  listPlat.set(id, pickPlat(platsFor(id), p));
-  renderListBody(id);
-}
-function setListType(id, t) {
-  listType.set(id, typeFor(id) === t ? 'all' : t);
-  renderListBody(id);
-}
-function openListInTable(id) {
-  const list = LISTS.find((l) => l.id === id);
-  const plats = platsFor(id);
-  const type = typeFor(id);
-  const range = rangeFor(id);
-  const label = [list.title, !isAll(plats) && meta.platforms.filter((p) => plats.has(p.id)).map((p) => p.name).join(', '), type !== 'all' && (type === 'film' ? 'Films' : 'Series'), range === 'recent' && 'Last year'].filter(Boolean).join(' · ');
-  drillTo(label, (s) => { if (!isAll(plats)) s.sets.platforms = new Set(plats); list.tbl(s); if (type !== 'all') s.type = type; if (range === 'recent') s.recent = true; }, { clean: true });
-}
+const animeBoard = createBoard({
+  root: '#animebody', view: '#view-anime', p: 'an-', from: 'anime', name: 'Anime', lists: ANIME_LISTS, groups: ANIME_GROUPS, subset: (r) => r._anime,
+  base: (s) => { s.anime = true; },
+  onCta: (kind) => drillTo('Anime', (s) => { s.anime = true; if (kind === 'table') byRating(s); }, { clean: true, to: kind === 'stats' ? '#stats' : '#table' }),
+  hero: (pool, counts) => {
+    const dubs = pool.filter((r) => r._aud.includes('en')).length;
+    return `
+    <div class="hero anime">
+      <span class="eyebrow">Anime</span>
+      <h2>Anime in the UK</h2>
+      <p><b>${num(pool.length)}</b> anime titles across ${joinNames(platformNames().map((n) => `<b>${esc(n)}</b>`))}: Crunchyroll's full library plus the anime on the other services${dubs ? `, with <b>${num(dubs)}</b> available in English dub` : ''}.</p>
+      <div class="cta"><button type="button" class="cta-a" data-cta="table">Browse the anime table</button><button type="button" class="cta-a" data-cta="stats">Anime statistics</button></div>
+      ${platformPills(counts.filter(([, n]) => n))}
+    </div>`;
+  },
+});
 
 // ---------- search as you type ----------
 let sugRows = [];
@@ -822,27 +947,29 @@ function searchTable() {
 
 // ---------- routing & drill-down ----------
 let route = 'home';
-let drill = null; // {snapshot, label, from}: filters as they were before a click on the home or statistics page
+// Each click on the home, anime or statistics pages that lands on another page pushes an entry holding the
+// filters as they were; Back (or the browser back button) pops entries until the page matches, so the trail
+// table -> anime statistics -> anime page is retraced one step at a time.
+const drills = []; // {snapshot, label, from, route}
+const topDrill = () => drills.at(-1) ?? null;
 
-function drillTo(label, mutate, { clean = false } = {}) {
-  drill ??= { snapshot: cloneState(state), from: route };
-  drill.label = label;
+function drillTo(label, mutate, { clean = false, to = '#table' } = {}) {
+  drills.push({ snapshot: cloneState(state), label, from: route, route: to === '#stats' ? 'stats' : 'table' }); // route = page it lands on
   if (clean) state = fresh();
   mutate(state);
   state.page = 0;
   syncUI();
-  location.hash = '#table';
+  location.hash = to;
 }
-function undoDrill() {
-  if (!drill) return;
-  state = drill.snapshot;
-  drill = null;
-  syncUI();
+function undoDrill(want) {
+  let restored = false;
+  while (topDrill() && topDrill().route !== want) { state = drills.pop().snapshot; restored = true; }
+  if (restored) syncUI();
 }
 
 function activeFilters() {
   const s = state;
-  return (s.type !== 'all') + (s.access !== 'any') + (s.hasAwards ? 1 : 0) + (s.recent ? 1 : 0)
+  return (s.type !== 'all') + (s.access !== 'any') + (s.hasAwards ? 1 : 0) + (s.recent ? 1 : 0) + (s.anime ? 1 : 0)
     + Object.values(s.sets).reduce((n, v) => n + v.size, 0)
     + Object.values(s.num).filter((v) => v != null).length
     + Object.values(s.text).filter(Boolean).length;
@@ -861,21 +988,22 @@ function refresh() {
 }
 
 function applyRoute() {
-  const want = { '#table': 'table', '#stats': 'stats' }[location.hash] ?? 'home';
-  if (want !== 'table') undoDrill();
+  const want = { '#table': 'table', '#stats': 'stats', '#anime': 'anime' }[location.hash] ?? 'home';
+  undoDrill(want);
   route = want;
   document.body.dataset.route = want;
-  for (const v of ['home', 'table', 'stats']) {
+  for (const v of ['home', 'anime', 'table', 'stats']) {
     $(`#view-${v}`).hidden = want !== v;
     $(`#tab-${v}`).classList.toggle('on', want === v);
   }
   $('#colwrap').hidden = want !== 'table';
-  $('#backbar').hidden = !(want === 'table' && drill);
-  if (drill) {
-    $('#backlabel').textContent = drill.label;
-    $('#back').textContent = `← Back to ${drill.from === 'home' ? 'home' : 'statistics'}`;
+  const d = topDrill();
+  $('#backbar').hidden = !(d && want === d.route);
+  if (d) {
+    $('#backlabel').textContent = d.label;
+    $('#back').textContent = `← Back to ${{ home: 'home', anime: 'anime', stats: 'statistics' }[d.from] ?? 'previous page'}`;
   }
-  if (want === 'home') $('#view-home').scrollTop = 0;
+  if (want === 'home' || want === 'anime') $(`#view-${want}`).scrollTop = 0;
   closeFlyout();
   document.body.classList.remove('nav-open');
   refresh();
@@ -910,6 +1038,7 @@ document.addEventListener('change', (e) => {
   else if (el.name === 'access') state.access = el.value;
   else if (el.id === 'hasAwards') state.hasAwards = el.checked;
   else if (el.id === 'recentOnly') state.recent = el.checked;
+  else if (el.id === 'animeOnly') state.anime = el.checked;
   else if (el.id === 'pagesize') state.pageSize = Number(el.value);
   else if (el.id === 'expand') {
     expand = el.checked;
@@ -989,10 +1118,10 @@ $('#colbtn').onclick = () => {
   m.hidden = !m.hidden;
   $('#colbtn').setAttribute('aria-expanded', String(!m.hidden));
 };
-$('#back').onclick = () => (history.length > 1 ? history.back() : (location.hash = drill?.from === 'home' ? '#home' : '#stats'));
+$('#back').onclick = () => (history.length > 1 ? history.back() : (location.hash = `#${topDrill()?.from ?? 'stats'}`));
 $('#reset').onclick = () => {
   state = fresh();
-  drill = null;
+  drills.length = 0;
   pickerQuery.actors = pickerQuery.directors = '';
   $('#q-actors').value = $('#q-directors').value = '';
   syncUI();
@@ -1006,33 +1135,8 @@ home.addEventListener('click', (e) => {
   const t = e.target;
   if (!t.closest('.sbox')) hideSuggest();
   if (t.closest('[data-searchall]')) return searchTable();
-  const open = t.closest('[data-open]');
-  if (open) { hideSuggest(); return openFlyout(byId.get(open.dataset.open)); }
-  const gp = t.closest('[data-gp]');
-  if (gp) return setGlobalPlat(gp.dataset.gp);
-  const gt = t.closest('[data-gt]');
-  if (gt) return setGlobalType(gt.dataset.gt);
-  const lt = t.closest('[data-lt]');
-  if (lt) return setListType(lt.dataset.list, lt.dataset.lt);
-  const gr = t.closest('[data-gr]');
-  if (gr) return setGlobalRange(gr.dataset.gr);
-  const lr = t.closest('[data-lr]');
-  if (lr) return setListRange(lr.dataset.list, lr.dataset.lr);
-  const lp = t.closest('[data-lp]');
-  if (lp) return setListPlat(lp.dataset.list, lp.dataset.lp);
-  const tb = t.closest('[data-table]');
-  if (tb) return openListInTable(tb.dataset.table);
-  const jump = t.closest('[data-jump]');
-  if (jump) return document.getElementById(jump.dataset.jump)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  const ex = t.closest('[data-expand]');
-  if (ex) $$('#homebody details.hl').forEach((d) => { d.open = ex.dataset.expand === 'open'; });
+  if (t.closest('[data-open]')) hideSuggest();
 });
-// lists render their rows the first time they are opened
-home.addEventListener('toggle', (e) => {
-  const d = e.target;
-  if (d.matches?.('details.hl') && d.open && !d.querySelector('.lbody[data-ready]')) renderListBody(d.id.slice(3));
-}, true);
-home.addEventListener('error', (e) => { if (e.target.tagName === 'IMG') e.target.style.visibility = 'hidden'; }, true);
 home.addEventListener('submit', (e) => { e.preventDefault(); searchTable(); });
 home.addEventListener('input', (e) => { if (e.target.id === 'homeq') suggest(); });
 home.addEventListener('focusin', (e) => { if (e.target.id === 'homeq' && $('#homeq').value.trim()) suggest(); });
@@ -1058,7 +1162,8 @@ $('#expand').checked = expand;
 buildColMenu();
 buildHead();
 syncUI();
-buildHome();
+homeBoard.build();
+animeBoard.build();
 applyRoute();
 document.body.classList.remove('loading');
 } catch (err) {

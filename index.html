@@ -12,6 +12,7 @@
     <h1><a href="#home">The Watcher</a></h1>
     <div class="tabs" role="tablist">
       <a href="#home" id="tab-home" role="tab">Home</a>
+      <a href="#anime" id="tab-anime" role="tab">Anime</a>
       <a href="#table" id="tab-table" role="tab">Table</a>
       <a href="#stats" id="tab-stats" role="tab">Statistics</a>
     </div>
@@ -38,6 +39,8 @@
         <input type="search" data-text="all" placeholder="title, cast, director, studio, plot…"></label>
       <label class="field">Description contains
         <input type="search" data-text="overview" placeholder="e.g. heist"></label>
+
+      <label class="check anime-check"><input type="checkbox" id="animeOnly"> Anime only <span class="hint">(Japanese animation, incl. all of Crunchyroll)</span></label>
 
       <fieldset><legend>Type</legend>
         <label><input type="radio" name="type" value="all" checked> All</label>
@@ -85,6 +88,7 @@
       </fieldset>
       <fieldset><legend>Series size</legend>
         <div class="pair"><input type="number" min="0" data-num="seasonsMin" placeholder="min seasons"><input type="number" min="0" data-num="episodesMin" placeholder="min episodes"></div>
+        <div class="pair"><input type="number" min="0" data-num="seasonsMax" placeholder="max seasons"><input type="number" min="0" data-num="episodesMax" placeholder="max episodes"></div>
       </fieldset>
 
       <label class="field">Actor / director text<input type="search" data-text="people" placeholder="partial name"></label>
@@ -102,13 +106,16 @@
         <p>Loading the UK catalogue…</p>
         <p class="lhint">First visit downloads about 8&nbsp;MB, so this can take a few seconds.</p>
       </div>
+      <div id="backbar" hidden>
+        <button id="back" type="button">← Back to statistics</button>
+        <span class="muted">Showing: <strong id="backlabel"></strong></span>
+      </div>
+
       <section id="view-home"><div id="homebody"></div></section>
 
+      <section id="view-anime" hidden><div id="animebody"></div></section>
+
       <section id="view-table" hidden>
-        <div id="backbar" hidden>
-          <button id="back" type="button">← Back to statistics</button>
-          <span class="muted">Showing: <strong id="backlabel"></strong></span>
-        </div>
         <div class="toolbar">
           <label class="check"><input type="checkbox" id="expand" checked> Expand descriptions</label>
           <span class="muted">Click a row for details</span>

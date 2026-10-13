@@ -1,10 +1,10 @@
 {
-  "updated": "2026-10-12T01:04:38.633Z",
+  "updated": "2026-10-13T18:13:02.754Z",
   "region": "GB",
   "sample": false,
   "counts": {
-    "films": 26514,
-    "series": 8936
+    "films": 26625,
+    "series": 10260
   },
   "platforms": [
     {
@@ -30,6 +30,12 @@
       "name": "HBO Max",
       "color": "#8f5cff",
       "searchUrl": "https://play.hbomax.com/search?q={q}"
+    },
+    {
+      "id": "crunchyroll",
+      "name": "Crunchyroll",
+      "color": "#f47521",
+      "searchUrl": "https://www.crunchyroll.com/search?q={q}"
     }
   ]
 }

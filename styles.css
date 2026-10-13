@@ -221,8 +221,9 @@ button.primary { background: var(--accent); color: #07101c; border-color: var(--
 /* ---------- home / landing ---------- */
 .top h1 a { color: inherit; }
 .top h1 a:hover { text-decoration: none; }
-body[data-route=home] nav#filters, body[data-route=home] #filterbar, body[data-route=home] #summary, body[data-route=home] #navscrim { display: none !important; }
-#view-home { flex: 1; overflow: auto; scroll-behavior: smooth; }
+body[data-route=home] nav#filters, body[data-route=home] #filterbar, body[data-route=home] #summary, body[data-route=home] #navscrim,
+body[data-route=anime] nav#filters, body[data-route=anime] #filterbar, body[data-route=anime] #summary, body[data-route=anime] #navscrim { display: none !important; }
+#view-home, #view-anime { flex: 1; overflow: auto; scroll-behavior: smooth; }
 .hero { position: relative; padding: 56px 20px 30px; text-align: center; border-bottom: 1px solid var(--line);
   background: radial-gradient(900px 380px at 15% -20%, #2c4a9a66, transparent 65%), radial-gradient(800px 380px at 95% -10%, #7a3a9a55, transparent 62%), linear-gradient(180deg, #131a28, var(--panel)); }
 .hero h2 { margin: 0 0 10px; font-size: clamp(28px, 5.4vw, 46px); letter-spacing: -.8px; line-height: 1.1; }
@@ -346,11 +347,16 @@ details.hl[open] .chev { transform: rotate(-135deg); }
   .hctl .muted { display: none; }
   .expcol button { padding: 6px 10px; font-size: 12px; }
   .hgroup { scroll-margin-top: 12px; }
-  body[data-route=home] { padding-bottom: 0; }
+  body[data-route=home], body[data-route=anime] { padding-bottom: 0; }
 }
 @media (max-width: 480px) {
-  #gplat { gap: 5px; }
-  .hctl .pchip { padding: 4px 9px; font-size: 12px; }
+  /* five platforms: keep them on one row, scrolling sideways if a narrow screen still can't fit them */
+  .hplat { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .hplat::-webkit-scrollbar { display: none; }
+  .gplat { flex-wrap: nowrap; gap: 4px; }
+  .hctl .pchip { padding: 4px 8px; font-size: 11.5px; flex: none; }
+  .tabs { gap: 0; }
+  .tabs a { padding: 6px 8px; }
 }
 
 .eyebrow { display: inline-block; margin-bottom: 14px; padding: 4px 14px; border: 1px solid #2f3b50; border-radius: 999px; background: #ffffff0a; color: #aab5c6; font-size: 12px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; }
@@ -375,3 +381,11 @@ body.loading nav#filters, body.loading #navscrim, body.loading #filterbar, body.
   .hexp { display: flex; }
   .hbar .expcol { display: none; }
 }
+
+/* anime page + anime filter */
+button.cta-a { font: inherit; cursor: pointer; }
+.hero.anime { background: radial-gradient(900px 380px at 12% -20%, #f4752155, transparent 65%), radial-gradient(800px 380px at 95% -10%, #c2346a44, transparent 62%), linear-gradient(180deg, #1a1612, var(--panel)); }
+.hero.anime .eyebrow { border-color: #f4752188; color: #ffb27a; }
+.anime-check { padding: 8px 10px; border: 1px solid #f4752155; border-radius: 8px; background: #f475210f; align-items: flex-start !important; }
+.anime-check .hint { margin: 0; font-size: 11px; }
+.scopenote { margin: 0 0 12px; padding: 8px 12px; border: 1px solid #f4752155; border-radius: 8px; background: #f475210f; color: #ffb27a; font-size: 13px; }
