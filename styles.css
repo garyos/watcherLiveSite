@@ -367,3 +367,11 @@ body.loading nav#filters, body.loading #navscrim, body.loading #filterbar, body.
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes fadein { to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+
+/* expand/collapse: inside the pinned bar on wide screens, as a normal row above the lists on phones */
+.hexp { display: none; gap: 8px; padding: 14px 0 0; }
+.hexp button { flex: 1; padding: 8px; }
+@media (max-width: 800px) {
+  .hexp { display: flex; }
+  .hbar .expcol { display: none; }
+}
