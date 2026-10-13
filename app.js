@@ -490,11 +490,12 @@ function renderStats(rows) {
     const y = years.get(r.year) ?? years.set(r.year, [0, 0]).get(r.year);
     y[r.type === 'film' ? 0 : 1]++;
   }
+  const narrow = matchMedia('(max-width: 480px)').matches; // fewer axis labels so they don't spill out of the card
   const yMin = 1950, yMax = Math.max(yMin, ...years.keys());
   const yearItems = [{ label: '<1950', parts: [{ v: pre[0], c: PALETTE[0] }, { v: pre[1], c: PALETTE[1] }], a: 'year', v: 'pre', tick: true, tip: `Before 1950: ${num(pre[0])} films, ${num(pre[1])} series` }];
   for (let y = yMin; y <= yMax; y++) {
     const [f, s] = years.get(y) ?? [0, 0];
-    yearItems.push({ label: String(y), parts: [{ v: f, c: PALETTE[0] }, { v: s, c: PALETTE[1] }], a: 'year', v: y, tick: y % 5 === 0 && y > 1950, tip: `${y}: ${num(f)} films, ${num(s)} series` });
+    yearItems.push({ label: String(y), parts: [{ v: f, c: PALETTE[0] }, { v: s, c: PALETTE[1] }], a: 'year', v: y, tick: y % (narrow ? 10 : 5) === 0 && y > 1950, tip: `${y}: ${num(f)} films, ${num(s)} series` });
   }
   const yearKey = `<p class="key"><span><i style="background:${PALETTE[0]}"></i>Films</span><span><i style="background:${PALETTE[1]}"></i>Series</span></p>`;
 
@@ -554,6 +555,8 @@ function renderStats(rows) {
     animeCards = `${card('English dub availability', donut(dubItems), '', 'where the service lists audio')}
     ${card('Episodes per series', columns(epItems, { height: 150 }))}`;
     scopeNote = '<p class="scopenote">Showing anime only. Untick “Anime only” in the filters to see everything.</p>';
+  } else if (state.type !== 'all') {
+    scopeNote = `<p class="scopenote">Showing ${state.type === 'film' ? 'films' : 'series'} only. Set Type back to All in the filters to see everything.</p>`;
   }
 
   root.innerHTML = `${stats.slice(0, stats.lastIndexOf('</div>'))}${animeTiles}</div>${scopeNote}<div class="grid">${animeCards}
@@ -626,8 +629,12 @@ const pickPlat = (cur, id) => {
   next.has(id) ? next.delete(id) : next.add(id);
   return next.size ? next : new Set(ALL_PLATS);
 };
-const platChips = (attr, extra, plats) => meta.platforms.map((p) =>
-  `<button type="button" class="pchip" style="--c:${esc(p.color)}" aria-pressed="${plats.has(p.id)}" ${attr}="${esc(p.id)}" ${extra}>${esc(p.name)}</button>`).join('');
+// "Prime Video" shortens to "Prime" on narrow screens so all five platform chips fit on one row
+const SHORT_NAMES = { prime: 'Prime' };
+const platChips = (attr, extra, plats) => meta.platforms.map((p) => {
+  const label = SHORT_NAMES[p.id] ? `<span class="pn">${esc(p.name)}</span><span class="ps">${esc(SHORT_NAMES[p.id])}</span>` : esc(p.name);
+  return `<button type="button" class="pchip" style="--c:${esc(p.color)}" aria-pressed="${plats.has(p.id)}" ${attr}="${esc(p.id)}" ${extra}>${label}</button>`;
+}).join('');
 const typeSeg = (attr, extra, cur) => `<span class="seg2" role="group" aria-label="Films or series">${[['film', 'Films'], ['series', 'Series']].map(([v, l]) =>
   `<button type="button" aria-pressed="${cur === 'all' || cur === v}" ${attr}="${v}" ${extra}>${l}</button>`).join('')}</span>`;
 const rangeSeg = (attr, extra, cur) => `<span class="seg2" role="group" aria-label="Time period">${[['recent', 'Last year'], ['all', 'All time']].map(([v, l]) =>
@@ -724,28 +731,102 @@ for (const [st, n] of [...animeStudios].sort((a, b) => b[1] - a[1]).filter(([, n
   addAnime('studios', `studio-${st}`, st, `${num(n)} titles`, (r) => r.studios.includes(st) && hasRating(r), (r) => r._wr, fmtRate, (s) => { s.text.studios = lc(st); byRating(s); });
 }
 
-// one engine drives both pages: lists, platform / film-series / period controls, expand all, table drill-down
+// ----- Film and Series lists -----
+const topCounts = (rows, field, min, n) => {
+  const m = new Map();
+  for (const r of rows) for (const k of r[field]) m.set(k, (m.get(k) ?? 0) + 1);
+  return [...m].filter(([, c]) => c >= min).sort((a, b) => b[1] - a[1]).slice(0, n);
+};
+const kindGroups = (noun, world) => [
+  { id: 'featured', title: 'Featured', cap: `Ranked across all the ${noun} you can watch`, color: PALETTE[0] },
+  { id: 'spotlight', title: 'Spotlight', cap: 'Handpicked angles', color: PALETTE[1] },
+  { id: 'genres', title: 'By genre', cap: 'The best of each genre, weighted by IMDb votes', color: PALETTE[2] },
+  { id: 'decades', title: 'By decade', cap: 'From the latest hits back to the classics', color: PALETTE[4] },
+  { id: 'languages', title: world, cap: 'Best of each original language beyond English', color: PALETTE[3] },
+  { id: 'people', title: 'By director', cap: 'The most-watched directors', color: PALETTE[5] },
+  { id: 'studios', title: 'By studio', cap: 'Where the studio is known', color: PALETTE[6] },
+];
+const DECADES = [['2020s', 2020, 2029], ['2010s', 2010, 2019], ['2000s', 2000, 2009], ['1990s', 1990, 1999], ['1980s', 1980, 1989], ['1970s & earlier', 0, 1979]];
+// the lists every film / series board shares: genre, decade, language, studio
+function addBrowseLists(add, rows, { people } = {}) {
+  for (const [g, n] of topCounts(rows, 'genres', 40, 40)) {
+    add('genres', `genre-${g}`, g, `${num(n)} titles`, (r) => r.genres.includes(g) && hasRating(r), (r) => r._wr, fmtRate, (s) => { s.sets.genres.add(g); byRating(s); });
+  }
+  decadeLists(add, DECADES);
+  for (const [l, n] of topCounts(rows, 'languages', 1, 40).filter(([l]) => l !== 'English').slice(0, 8)) {
+    add('languages', `lang-${l}`, l, `${num(n)} titles`, (r) => r.languages.includes(l) && hasRating(r), (r) => r._wr, fmtRate, (s) => { s.sets.langs = new Set([l]); byRating(s); });
+  }
+  if (people) {
+    for (const [d, n] of topCounts(rows, 'directors', 8, 12)) {
+      add('people', `dir-${d}`, d, `${num(n)} titles`, (r) => r.directors.includes(d) && hasRating(r), (r) => r._wr, fmtRate, (s) => { s.sets.directors.add(d); byRating(s); });
+    }
+  }
+  for (const [st, n] of topCounts(rows, 'studios', 10, 12)) {
+    add('studios', `studio-${st}`, st, `${num(n)} titles`, (r) => r.studios.includes(st) && hasRating(r), (r) => r._wr, fmtRate, (s) => { s.text.studios = lc(st); byRating(s); });
+  }
+}
+const addFamily = (add) => add('spotlight', 'family', 'Family night', 'Rated U or PG', (r) => (r.age === 'U' || r.age === 'PG') && hasRating(r), (r) => r._wr, fmtRate,
+  (s) => { s.sets.ages = new Set(['U', 'PG']); byRating(s); });
+const addGems = (add) => add('spotlight', 'gems', 'Hidden gems', 'Rated 7.5+ with under 10k votes', (r) => r.rating >= 7.5 && r.votes >= 300 && r.votes < 10000, (r) => r.rating * 1000 + Math.min(r.votes, 999), fmtRate,
+  (s) => { s.num.ratingMin = 7.5; byRating(s); });
+const addClassics = (add) => add('spotlight', 'classics', 'Classics', 'Released before 1980', (r) => r.year < 1980 && hasRating(r), (r) => r._wr, fmtRate, (s) => { s.num.yearMax = 1979; byRating(s); }).range = 'all'; // nothing recent is a classic
+
+const filmRows = data.filter((r) => r.type === 'film');
+const FILM_GROUPS = kindGroups('films', 'World cinema');
+const FILM_LISTS = [];
+const addFilm = makeAdder(FILM_LISTS);
+addFeatured(addFilm);
+addFilm('spotlight', 'quick', 'Quick watches', 'Films under 95 minutes', (r) => r.runtime && r.runtime <= 95 && hasRating(r), (r) => r._wr, fmtRate, (s) => { s.num.runtimeMax = 95; byRating(s); });
+addFilm('spotlight', 'epic', 'Epics', 'Films of 150 minutes or more', (r) => r.runtime >= 150 && hasRating(r), (r) => r._wr, fmtRate, (s) => { s.num.runtimeMin = 150; byRating(s); });
+addFamily(addFilm); addGems(addFilm); addClassics(addFilm);
+addBrowseLists(addFilm, filmRows, { people: true });
+
+const seriesRows = data.filter((r) => r.type === 'series');
+const SERIES_GROUPS = kindGroups('series', 'World TV').filter((g) => g.id !== 'people');
+const SERIES_LISTS = [];
+const addSeries = makeAdder(SERIES_LISTS);
+addFeatured(addSeries);
+addSeries('spotlight', 'binge', 'Binge-worthy', 'Three or more seasons', (r) => r.seasons >= 3 && hasRating(r), (r) => r._wr, fmtRate, (s) => { s.num.seasonsMin = 3; byRating(s); });
+addSeries('spotlight', 'limited', 'Limited series', 'One season of 10 episodes or fewer', (r) => r.seasons === 1 && r.episodes > 0 && r.episodes <= 10 && hasRating(r), (r) => r._wr, fmtEps,
+  (s) => { s.num.seasonsMax = 1; s.num.episodesMax = 10; byRating(s); });
+addSeries('spotlight', 'long', 'Long-runners', 'Series with 100+ episodes', (r) => r.episodes >= 100, (r) => r.episodes, fmtEps,
+  (s) => { s.num.episodesMin = 100; s.sort = { key: 'episodes', dir: -1 }; });
+addFamily(addSeries); addGems(addSeries); addClassics(addSeries);
+addBrowseLists(addSeries, seriesRows);
+
+const PAGE = 20, MAX_PAGES = 3; // each list shows 20 at first and can grow to 60 in two steps
+const sameSet = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
+
+// one engine drives every landing page: lists, the universal platform / film-series / period controls,
+// pagination, expand all and the table drill-down
 function createBoard(cfg) {
-  const { lists, groups, from } = cfg;
+  const { lists, groups } = cfg;
   const pool = data.filter(cfg.subset);
-  const plat = new Set(ALL_PLATS); // global platform filter: every platform, or a chosen few
-  const listPlat = new Map(); // per-list overrides
-  let gType = 'all';
-  const listType = new Map();
+  const defaults = cfg.defaults ?? new Set(ALL_PLATS); // the platforms selected on arrival and after deselecting them all
+  const plat = new Set(defaults);
+  let gType = cfg.fixedType ?? 'all';
   let gRange = 'all'; // 'all' time or 'recent' (last 12 months)
-  const listRange = new Map();
+  const pages = new Map(); // list id -> how many pages of 20 are showing
   const root = () => $(cfg.root);
   const find = (id) => lists.find((l) => l.id === id);
-  const platsFor = (id) => listPlat.get(id) ?? plat;
-  const typeFor = (id) => find(id).type ?? listType.get(id) ?? gType;
-  const rangeFor = (id) => find(id).range ?? listRange.get(id) ?? gRange;
+  const typeFor = (l) => l.type ?? gType;
+  const rangeFor = (l) => l.range ?? gRange;
   const el = (sel) => $(sel, root());
   const bodyOf = (id) => el(`details[data-list-id="${CSS.escape(id)}"] .lbody`);
+  // multi-select: from the default selection the first click shows just that platform, further clicks add or
+  // remove platforms, and deselecting the last one falls back to the default
+  const pick = (id) => {
+    if (sameSet(plat, defaults)) return new Set([id]);
+    const next = new Set(plat);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next.size ? next : new Set(defaults);
+  };
 
-  function topOf(list, plats, type, range, limit = 20) {
+  function topOf(list, limit = PAGE * MAX_PAGES) {
+    const type = typeFor(list), range = rangeFor(list);
     const hits = [];
     for (const r of pool) {
-      if ((type === 'all' || r.type === type) && (range !== 'recent' || isRecent(r)) && r.offers.some((o) => plats.has(o.platform)) && list.pred(r)) hits.push(r);
+      if ((type === 'all' || r.type === type) && (range !== 'recent' || isRecent(r)) && r.offers.some((o) => plat.has(o.platform)) && list.pred(r)) hits.push(r);
     }
     const scored = hits.map((r) => [list.score(r), r]).sort((a, b) => b[0] - a[0] || b[1].votes - a[1].votes);
     return { rows: scored.slice(0, limit).map((x) => x[1]), total: hits.length };
@@ -766,29 +847,29 @@ function createBoard(cfg) {
     const list = find(id);
     const body = bodyOf(id);
     if (!list || !body) return;
-    const plats = platsFor(id);
-    const type = typeFor(id);
-    const range = rangeFor(id);
-    const { rows, total } = topOf(list, plats, type, range);
-    const segs = `${list.type ? '' : typeSeg('data-lt', `data-list="${esc(id)}"`, type)}${list.range ? '' : rangeSeg('data-lr', `data-list="${esc(id)}"`, range)}`;
-    body.innerHTML = `<div class="ltools"><div class="ptoggles">${platChips('data-lp', `data-list="${esc(id)}"`, plats)}</div>${segs ? `<div class="ptoggles">${segs}</div>` : ''}</div>
-      ${rows.length ? listRows(list, rows) : `<p class="muted pad">${range === 'recent' ? 'Nothing released in the last year matches these filters.' : 'Nothing matches these filters.'}</p>`}
-      <div class="lfoot"><span class="muted">Top ${rows.length} of ${num(total)}${range === 'recent' ? ' from the last year' : ''}</span><button type="button" class="link" data-table="${esc(id)}">See all in table →</button></div>`;
+    const { rows, total } = topOf(list);
+    const page = pages.get(id) ?? 1;
+    const shown = Math.min(rows.length, page * PAGE);
+    const range = rangeFor(list);
+    const notes = [range === 'recent' ? 'from the last year' : '', list.range === 'all' && gRange === 'recent' ? 'always all time' : ''].filter(Boolean).join(', ');
+    body.innerHTML = `${shown ? listRows(list, rows.slice(0, shown)) : `<p class="muted pad">${range === 'recent' ? 'Nothing released in the last year matches these filters.' : 'Nothing matches these filters.'}</p>`}
+      <div class="lfoot"><span class="muted">${shown ? `Showing 1–${shown}` : 'Showing 0'} of ${num(total)}${notes ? ` · ${notes}` : ''}</span>
+        <span class="lbtns">${shown < rows.length ? `<button type="button" data-more="${esc(id)}">Show next ${Math.min(PAGE, rows.length - shown)}</button>` : ''}${page > 1 ? `<button type="button" data-less="${esc(id)}">Back to top ${PAGE}</button>` : ''}<button type="button" class="link" data-table="${esc(id)}">See all in table →</button></span></div>`;
     body.dataset.ready = '1';
   }
 
   function renderRail() {
-    const rail = find('popnew');
-    const rows = topOf(rail, plat, gType, gRange, 80).rows.filter((r) => r.poster).slice(0, 16);
+    const rows = topOf(find('popnew'), 80).rows.filter((r) => r.poster).slice(0, 16);
     el('.rail').innerHTML = rows.map((r) =>
       `<button type="button" class="pc" data-open="${esc(r.id)}"><img loading="lazy" decoding="async" alt="Poster for ${esc(r.title)}" referrerpolicy="no-referrer" src="${POSTER(r.poster, 's276')}"><b>${esc(r.title)}</b><small>${[r.year, r.type === 'series' && r.seasons ? `${r.seasons} season${r.seasons > 1 ? 's' : ''}` : '', star(r)].filter(Boolean).join(' · ')}</small></button>`).join('')
       || '<p class="muted pad">Nothing matches these filters.</p>';
   }
 
-  // re-render everything that follows the global platform / film-or-series / period choices
+  // re-render everything that follows the universal platform / film-or-series / period controls
   function sync() {
+    pages.clear(); // a change of filters starts every list back at its first page
     el('.gplat').innerHTML = platChips('data-gp', '', plat);
-    el('.gtype').innerHTML = typeSeg('data-gt', '', gType);
+    if (el('.gtype')) el('.gtype').innerHTML = typeSeg('data-gt', '', gType);
     el('.grange').innerHTML = rangeSeg('data-gr', '', gRange);
     renderRail();
     for (const d of $$('details.hl[open]', root())) renderListBody(d.dataset.listId);
@@ -802,7 +883,6 @@ function createBoard(cfg) {
         <button type="button" data-jump="${cfg.p}h-rail">Trending</button>${gs.map((g) => `<button type="button" data-jump="${cfg.p}h-${g.id}">${esc(g.title)}</button>`).join('')}
       </div>
       <div class="hwrap">
-        <div class="hexp"><button type="button" data-expand="open">Expand all</button><button type="button" data-expand="close">Collapse all</button></div>
         <section class="hgroup" id="${cfg.p}h-rail"><div class="ghead"><h3>Trending now</h3><p>Popular new releases</p></div><div class="rail"></div></section>
         ${gs.map((g) => `<section class="hgroup" id="${cfg.p}h-${g.id}" style="--g:${g.color}"><div class="ghead"><h3>${esc(g.title)}</h3><p>${esc(g.cap)}</p></div>
           <div class="lists">${lists.filter((l) => l.group === g.id).map((l) => `<details class="hl" id="hl-${cfg.p}${esc(l.id)}" data-list-id="${esc(l.id)}"><summary><span class="ht"><b>${esc(l.title)}</b><small>${esc(l.sub)}</small></span><span class="chev" aria-hidden="true"></span></summary><div class="lbody"></div></details>`).join('')}</div></section>`).join('')}
@@ -810,27 +890,39 @@ function createBoard(cfg) {
       <div class="hbar">
         <div class="hctl">
           <div class="ptoggles hplat" role="group" aria-label="Platform for all lists"><span class="muted">Platform</span><span class="gplat ptoggles"></span></div>
-          <div class="ptoggles" role="group" aria-label="Films or series for all lists"><span class="muted">Show</span><span class="gtype"></span></div>
-          <div class="ptoggles" role="group" aria-label="Time period for all lists"><span class="muted">Period</span><span class="grange"></span></div>
+          ${cfg.fixedType ? '' : '<div class="ptoggles hshow" role="group" aria-label="Films or series for all lists"><span class="muted">Show</span><span class="gtype"></span></div>'}
+          <div class="ptoggles hper" role="group" aria-label="Time period for all lists"><span class="muted">Period</span><span class="grange"></span></div>
           <div class="expcol"><button type="button" data-expand="open">Expand all</button><button type="button" data-expand="close">Collapse all</button></div>
         </div>
       </div>`;
     sync();
   }
 
+  // the table gets the same platform / type / period choices the lists were showing
+  function drillFor(extra) {
+    return (s) => {
+      cfg.base?.(s);
+      if (!isAll(plat)) s.sets.platforms = new Set(plat);
+      extra?.(s);
+    };
+  }
+  function platformLabel() {
+    return sameSet(plat, defaults) ? '' : meta.platforms.filter((p) => plat.has(p.id)).map((p) => p.name).join(', ');
+  }
   function openListInTable(id) {
     const list = find(id);
-    const plats = platsFor(id);
-    const type = typeFor(id);
-    const range = rangeFor(id);
-    const label = [cfg.name && `${cfg.name}: ${list.title}` || list.title, !isAll(plats) && meta.platforms.filter((p) => plats.has(p.id)).map((p) => p.name).join(', '), type !== 'all' && (type === 'film' ? 'Films' : 'Series'), range === 'recent' && 'Last year'].filter(Boolean).join(' · ');
-    drillTo(label, (s) => {
-      cfg.base?.(s);
-      if (!isAll(plats)) s.sets.platforms = new Set(plats);
+    const type = typeFor(list);
+    const range = rangeFor(list);
+    const label = [cfg.name ? `${cfg.name}: ${list.title}` : list.title, platformLabel(), !cfg.fixedType && type !== 'all' && (type === 'film' ? 'Films' : 'Series'), range === 'recent' && 'Last year'].filter(Boolean).join(' · ');
+    drillTo(label, drillFor((s) => {
       list.tbl(s);
       if (type !== 'all') s.type = type;
       if (range === 'recent') s.recent = true;
-    }, { clean: true });
+    }), { clean: true });
+  }
+  // hero buttons: browse this section as a table, or see its statistics
+  function openCta(kind) {
+    drillTo(cfg.name ?? 'Everything', drillFor((s) => { if (kind === 'table') byRating(s); }), { clean: true, to: kind === 'stats' ? '#stats' : '#table' });
   }
 
   const view = $(cfg.view);
@@ -839,21 +931,19 @@ function createBoard(cfg) {
     const open = t.closest('[data-open]');
     if (open) return openFlyout(byId.get(open.dataset.open));
     const gp = t.closest('[data-gp]');
-    if (gp) { const next = pickPlat(plat, gp.dataset.gp); plat.clear(); next.forEach((p) => plat.add(p)); listPlat.clear(); return sync(); }
+    if (gp) { const next = pick(gp.dataset.gp); plat.clear(); next.forEach((p) => plat.add(p)); return sync(); }
     const gt = t.closest('[data-gt]');
-    if (gt) { gType = gType === gt.dataset.gt ? 'all' : gt.dataset.gt; listType.clear(); return sync(); }
+    if (gt) { gType = gType === gt.dataset.gt ? 'all' : gt.dataset.gt; return sync(); }
     const gr = t.closest('[data-gr]');
-    if (gr) { gRange = gRange === gr.dataset.gr && gr.dataset.gr === 'recent' ? 'all' : gr.dataset.gr; listRange.clear(); return sync(); } // the active "Last year" goes back to all time
-    const lp = t.closest('[data-lp]');
-    if (lp) { listPlat.set(lp.dataset.list, pickPlat(platsFor(lp.dataset.list), lp.dataset.lp)); return renderListBody(lp.dataset.list); }
-    const lt = t.closest('[data-lt]');
-    if (lt) { const id = lt.dataset.list; listType.set(id, typeFor(id) === lt.dataset.lt ? 'all' : lt.dataset.lt); return renderListBody(id); }
-    const lr = t.closest('[data-lr]');
-    if (lr) { const id = lr.dataset.list; listRange.set(id, rangeFor(id) === lr.dataset.lr && lr.dataset.lr === 'recent' ? 'all' : lr.dataset.lr); return renderListBody(id); }
+    if (gr) { gRange = gRange === gr.dataset.gr && gr.dataset.gr === 'recent' ? 'all' : gr.dataset.gr; return sync(); } // the active "Last year" goes back to all time
+    const more = t.closest('[data-more]');
+    if (more) { const id = more.dataset.more; pages.set(id, Math.min(MAX_PAGES, (pages.get(id) ?? 1) + 1)); return renderListBody(id); }
+    const less = t.closest('[data-less]');
+    if (less) { const id = less.dataset.less; pages.delete(id); renderListBody(id); return less.closest('details')?.scrollIntoView({ block: 'nearest' }); }
     const tb = t.closest('[data-table]');
     if (tb) return openListInTable(tb.dataset.table);
     const cta = t.closest('[data-cta]');
-    if (cta) return cfg.onCta?.(cta.dataset.cta);
+    if (cta) return openCta(cta.dataset.cta);
     const jump = t.closest('[data-jump]');
     if (jump) return document.getElementById(jump.dataset.jump)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     const ex = t.closest('[data-expand]');
@@ -868,37 +958,66 @@ function createBoard(cfg) {
   return { build };
 }
 
-const platformPills = (counts) => `<ul class="pills">${counts.map(([p, n]) => `<li><i style="background:${esc(p.color)}"></i>${esc(p.name)} <b>${num(n)}</b></li>`).join('')}</ul>`;
+const platformPills = (counts) => `<ul class="pills">${counts.filter(([, n]) => n).map(([p, n]) => `<li><i style="background:${esc(p.color)}"></i>${esc(p.name)} <b>${num(n)}</b></li>`).join('')}</ul>`;
 const platformNames = () => meta.platforms.map((p) => p.name);
 const joinNames = (a) => `${a.slice(0, -1).join(', ')} and ${a.at(-1)}`;
+const boldNames = () => joinNames(platformNames().map((n) => `<b>${esc(n)}</b>`));
+// Crunchyroll is anime, so the film and series pages leave it out until you add it, keeping their lists mostly non-anime
+const NON_ANIME_PLATFORMS = new Set(ALL_PLATS.filter((id) => id !== 'crunchyroll'));
+
+// the film and series pages start with Crunchyroll off, so describe (and count) what is actually showing
+const nonAnimeIntro = (pool, noun) => `<b>${num(pool.filter((r) => r.offers.some((o) => NON_ANIME_PLATFORMS.has(o.platform))).length)}</b> ${noun} across ${joinNames(meta.platforms.filter((p) => NON_ANIME_PLATFORMS.has(p.id)).map((p) => `<b>${esc(p.name)}</b>`))}. Crunchyroll is switched off here to keep the lists mostly non-anime; add it with the platform pills below.`;
+
+function sectionHero({ eyebrow, title, intro, name, extraClass = '', counts }) {
+  return `
+    <div class="hero ${extraClass}">
+      <span class="eyebrow">${esc(eyebrow)}</span>
+      <h2>${esc(title)}</h2>
+      <p>${intro}</p>
+      <div class="cta"><button type="button" class="cta-a" data-cta="table">Browse the ${esc(name)} table</button><button type="button" class="cta-a" data-cta="stats">${esc(name[0].toUpperCase() + name.slice(1))} statistics</button></div>
+      ${platformPills(counts)}
+    </div>`;
+}
 
 const homeBoard = createBoard({
-  root: '#homebody', view: '#view-home', p: '', from: 'home', lists: HOME_LISTS, groups: HOME_GROUPS, subset: () => true,
+  root: '#homebody', view: '#view-home', p: '', lists: HOME_LISTS, groups: HOME_GROUPS, subset: () => true,
   hero: (pool, counts) => `
     <div class="hero">
       <span class="eyebrow">The Watcher</span>
       <h2>What to watch in the UK</h2>
-      <p>Every film and series included with ${joinNames(platformNames().map((n) => `<b>${esc(n)}</b>`))}. Ranked, filterable and ready to dive into.</p>
+      <p>Every film and series included with ${boldNames()}. Ranked, filterable and ready to dive into.</p>
       <form id="homesearch" role="search"><div class="sbox"><input type="search" id="homeq" autocomplete="off" placeholder="Search titles, actors, directors…" aria-label="Search titles" aria-controls="suggest"><ul id="suggest" role="listbox" hidden></ul></div><button type="submit" class="primary">Search</button></form>
-      <div class="cta"><a class="cta-a" href="#anime">Anime</a><a class="cta-a" href="#table">Browse the table</a><a class="cta-a" href="#stats">Explore statistics</a></div>
+      <div class="sections" role="navigation" aria-label="Sections">
+        <a class="sec films" href="#films"><b>Films</b><span>${num(filmRows.length)}</span></a>
+        <a class="sec series" href="#series"><b>Series</b><span>${num(seriesRows.length)}</span></a>
+        <a class="sec anime" href="#anime"><b>Anime</b><span>${num(animeRows.length)}</span></a>
+      </div>
+      <div class="cta"><a class="cta-a" href="#table">Browse the table</a><a class="cta-a" href="#stats">Explore statistics</a></div>
       ${platformPills(counts)}
     </div>`,
 });
 
+const filmsBoard = createBoard({
+  root: '#filmsbody', view: '#view-films', p: 'fl-', name: 'Films', lists: FILM_LISTS, groups: FILM_GROUPS, subset: (r) => r.type === 'film',
+  fixedType: 'film', defaults: NON_ANIME_PLATFORMS, base: (s) => { s.type = 'film'; },
+  hero: (pool, counts) => sectionHero({ eyebrow: 'Films', title: 'Films in the UK', name: 'films', counts,
+    intro: nonAnimeIntro(pool, 'films') }),
+});
+
+const seriesBoard = createBoard({
+  root: '#seriesbody', view: '#view-series', p: 'se-', name: 'Series', lists: SERIES_LISTS, groups: SERIES_GROUPS, subset: (r) => r.type === 'series',
+  fixedType: 'series', defaults: NON_ANIME_PLATFORMS, base: (s) => { s.type = 'series'; },
+  hero: (pool, counts) => sectionHero({ eyebrow: 'Series', title: 'Series in the UK', name: 'series', counts,
+    intro: nonAnimeIntro(pool, 'series') }),
+});
+
 const animeBoard = createBoard({
-  root: '#animebody', view: '#view-anime', p: 'an-', from: 'anime', name: 'Anime', lists: ANIME_LISTS, groups: ANIME_GROUPS, subset: (r) => r._anime,
+  root: '#animebody', view: '#view-anime', p: 'an-', name: 'Anime', lists: ANIME_LISTS, groups: ANIME_GROUPS, subset: (r) => r._anime,
   base: (s) => { s.anime = true; },
-  onCta: (kind) => drillTo('Anime', (s) => { s.anime = true; if (kind === 'table') byRating(s); }, { clean: true, to: kind === 'stats' ? '#stats' : '#table' }),
   hero: (pool, counts) => {
     const dubs = pool.filter((r) => r._aud.includes('en')).length;
-    return `
-    <div class="hero anime">
-      <span class="eyebrow">Anime</span>
-      <h2>Anime in the UK</h2>
-      <p><b>${num(pool.length)}</b> anime titles across ${joinNames(platformNames().map((n) => `<b>${esc(n)}</b>`))}: Crunchyroll's full library plus the anime on the other services${dubs ? `, with <b>${num(dubs)}</b> available in English dub` : ''}.</p>
-      <div class="cta"><button type="button" class="cta-a" data-cta="table">Browse the anime table</button><button type="button" class="cta-a" data-cta="stats">Anime statistics</button></div>
-      ${platformPills(counts.filter(([, n]) => n))}
-    </div>`;
+    return sectionHero({ eyebrow: 'Anime', title: 'Anime in the UK', name: 'anime', extraClass: 'anime', counts,
+      intro: `<b>${num(pool.length)}</b> anime titles across ${boldNames()}: Crunchyroll's full library plus the anime on the other services${dubs ? `, with <b>${num(dubs)}</b> available in English dub` : ''}.` });
   },
 });
 
@@ -947,6 +1066,7 @@ function searchTable() {
 
 // ---------- routing & drill-down ----------
 let route = 'home';
+const BOARD_ROUTES = ['home', 'films', 'series', 'anime'];
 // Each click on the home, anime or statistics pages that lands on another page pushes an entry holding the
 // filters as they were; Back (or the browser back button) pops entries until the page matches, so the trail
 // table -> anime statistics -> anime page is retraced one step at a time.
@@ -988,11 +1108,12 @@ function refresh() {
 }
 
 function applyRoute() {
-  const want = { '#table': 'table', '#stats': 'stats', '#anime': 'anime' }[location.hash] ?? 'home';
+  const want = { '#table': 'table', '#stats': 'stats', '#anime': 'anime', '#films': 'films', '#series': 'series' }[location.hash] ?? 'home';
   undoDrill(want);
   route = want;
   document.body.dataset.route = want;
-  for (const v of ['home', 'anime', 'table', 'stats']) {
+  document.body.classList.toggle('boardpage', BOARD_ROUTES.includes(want)); // landing pages have no filter sidebar
+  for (const v of ['home', 'films', 'series', 'anime', 'table', 'stats']) {
     $(`#view-${v}`).hidden = want !== v;
     $(`#tab-${v}`).classList.toggle('on', want === v);
   }
@@ -1001,9 +1122,10 @@ function applyRoute() {
   $('#backbar').hidden = !(d && want === d.route);
   if (d) {
     $('#backlabel').textContent = d.label;
-    $('#back').textContent = `← Back to ${{ home: 'home', anime: 'anime', stats: 'statistics' }[d.from] ?? 'previous page'}`;
+    $('#back').textContent = `← Back to ${{ home: 'home', films: 'films', series: 'series', anime: 'anime', stats: 'statistics' }[d.from] ?? 'previous page'}`;
   }
-  if (want === 'home' || want === 'anime') $(`#view-${want}`).scrollTop = 0;
+  if (BOARD_ROUTES.includes(want)) $(`#view-${want}`).scrollTop = 0;
+  $(`#tab-${want}`).scrollIntoView({ inline: 'center', block: 'nearest' }); // keep the current tab visible when the tab row scrolls
   closeFlyout();
   document.body.classList.remove('nav-open');
   refresh();
@@ -1163,6 +1285,8 @@ buildColMenu();
 buildHead();
 syncUI();
 homeBoard.build();
+filmsBoard.build();
+seriesBoard.build();
 animeBoard.build();
 applyRoute();
 document.body.classList.remove('loading');

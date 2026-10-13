@@ -12,9 +12,11 @@
     <h1><a href="#home">The Watcher</a></h1>
     <div class="tabs" role="tablist">
       <a href="#home" id="tab-home" role="tab">Home</a>
+      <a href="#films" id="tab-films" role="tab">Films</a>
+      <a href="#series" id="tab-series" role="tab">Series</a>
       <a href="#anime" id="tab-anime" role="tab">Anime</a>
       <a href="#table" id="tab-table" role="tab">Table</a>
-      <a href="#stats" id="tab-stats" role="tab">Statistics</a>
+      <a href="#stats" id="tab-stats" role="tab"><span class="full">Statistics</span><span class="short">Stats</span></a>
     </div>
     <span id="summary" class="muted"></span>
     <span class="spacer"></span>
@@ -111,9 +113,11 @@
         <span class="muted">Showing: <strong id="backlabel"></strong></span>
       </div>
 
-      <section id="view-home"><div id="homebody"></div></section>
+      <section id="view-home" class="boardview"><div id="homebody"></div></section>
+      <section id="view-films" class="boardview" hidden><div id="filmsbody"></div></section>
+      <section id="view-series" class="boardview" hidden><div id="seriesbody"></div></section>
 
-      <section id="view-anime" hidden><div id="animebody"></div></section>
+      <section id="view-anime" class="boardview" hidden><div id="animebody"></div></section>
 
       <section id="view-table" hidden>
         <div class="toolbar">
