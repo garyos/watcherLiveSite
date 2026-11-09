@@ -1,10 +1,10 @@
 {
-  "updated": "2026-11-02T12:40:27.012Z",
+  "updated": "2026-11-09T13:05:11.123Z",
   "region": "GB",
   "sample": false,
   "counts": {
-    "films": 27252,
-    "series": 10410
+    "films": 27366,
+    "series": 10446
   },
   "platforms": [
     {
